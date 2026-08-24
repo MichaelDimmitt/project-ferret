@@ -53,7 +53,7 @@ discipline alone.
 same file leaves M2 onward untouched — which is why this milestone spends its
 effort on the schema.
 
-- [ ] `docs/design/MANIFEST_SCHEMA.md` — every field, every `expect` type, worked examples
+- [x] `docs/design/MANIFEST_SCHEMA.md` — every field, every `expect` type, worked examples
 - [ ] JSON Schema at `manifest/_schema.json`; validation runs before any probe executes
 - [ ] `ferret/runner.go` — loads manifest, evaluates `applies_if`, runs `probe` and `declared`, enforces `timeout_s`, writes `evidence.json`
 - [ ] Four states with mandatory `reason` on UNKNOWN
