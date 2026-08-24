@@ -63,7 +63,7 @@
 - **After editing anything in `scripts/os/`:**
   - `./bootstrap/run.sh` — still runs?
   - `/bin/dash scripts/default-script.sh.example /tmp/check.md` — no bashisms?
-  - `./tests/run.sh` — all tests still pass?
+  - `./tests/run.sh` — all tests pass and shellcheck is clean?
   - Add rows with `row`, never a bare `printf` — it escapes `|` and redacts.
 
 - **Adding a new OS:**

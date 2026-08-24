@@ -249,13 +249,16 @@ After editing anything under `scripts/os/`:
 # No bashisms — must behave identically under a strict POSIX shell
 /bin/dash scripts/default-script.sh.example /tmp/dash-check.md
 
-# All tests — required after touching cell(), redact.sh, or adding a probe
+# All tests + shellcheck — required after touching cell(), redact.sh,
+# or adding a probe
 ./tests/run.sh
 
-# Lint, if you have it
-shellcheck -s sh scripts/default-script.sh.example scripts/lib/*.sh \
-  scripts/os/*.sh bootstrap/run.sh
 ```
+
+`tests/run.sh` runs shellcheck itself when it's installed
+(`brew install shellcheck`) and skips it otherwise — a missing linter isn't a
+failure, but a finding it reports is. `.shellcheckrc` disables three
+architectural checks, each with its reason; anything else it flags is real.
 
 A row must have exactly 5 columns. Probe output can contain `|` — the `cell()`
 helper escapes it, so add rows with `row`, never with a bare `printf`. That

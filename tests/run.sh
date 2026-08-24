@@ -31,6 +31,29 @@ if [ "$total" -eq 0 ]; then
   exit 1
 fi
 
+# Lint, when available. Not having shellcheck is not a failure — it is not a
+# dependency — but a finding it reports is.
+root=$(dirname -- "$here")
+if command -v shellcheck >/dev/null 2>&1; then
+  if shellcheck -s sh \
+      "$root"/scripts/default-script.sh.example \
+      "$root"/scripts/lib/*.sh \
+      "$root"/scripts/os/*.sh \
+      "$root"/bootstrap/run.sh \
+      "$root"/scripts/sweep.sh \
+      "$root"/tests/*.sh; then
+    echo "shellcheck: clean"
+  else
+    failed=$((failed + 1))
+    total=$((total + 1))
+    echo "  ^^ shellcheck FAILED"
+  fi
+  echo
+else
+  echo "shellcheck: not installed — skipped (brew install shellcheck)"
+  echo
+fi
+
 if [ "$failed" -eq 0 ]; then
   echo "all $total test files passed"
   exit 0
