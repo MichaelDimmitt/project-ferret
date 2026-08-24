@@ -125,13 +125,27 @@ Everything before that is preflight — cheap checks that *explain* a failure an
 
 ```sh
 ./bootstrap/run.sh      # 1. measure this machine — works now
-./scripts/sweep.sh      # 2. capture evidence     — works now
+./scripts/sweep.sh      # 2. check this repo      — works now
 ```
 
-The sweep currently captures; it does not yet decide. It writes
-`.ferret/evidence.json` and stops, because the verdict engine is M2 and the
-glance is M4. `./scripts/sweep.sh -validate` checks the manifest without
-running a single probe.
+The pipeline runs end to end: probes execute, a verdict is decided from the
+captured evidence alone, and the glance is written to stdout and
+`.ferret/status.md`.
+
+What is not built yet is stated in the output rather than hidden — the STACK
+and PROPOSED sections say which milestone fills them. **The manifest ships
+empty**, so a sweep today checks nothing until you add checks or point `-manifest`
+at your own; populating the layers is M7.
+
+```sh
+./scripts/sweep.sh -validate            # check the manifest, run no probes
+./scripts/sweep.sh -verdict             # re-decide from stored evidence
+./scripts/sweep.sh -manifest ./my.d     # use your own checks
+```
+
+`-verdict` is the one worth knowing: it re-answers from `.ferret/evidence.json`
+without touching the machine, so you can change an expectation and see the new
+verdict without re-measuring a slow or flaky box.
 
 Stage zero first, always; everything after reads what it measured.
 Quick list: `HOW-simple.md`. Full detail: `HOW.md`.

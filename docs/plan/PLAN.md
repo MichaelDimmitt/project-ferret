@@ -138,16 +138,42 @@ could not wait. What remains is the DAG's own machinery.
 
 The product. Everything before this is plumbing.
 
-- [ ] `ferret/render.go` → `status.md` + stdout
-- [ ] Ordered by **severity, not by layer**
-- [ ] Sections: VERDICT / BLOCKERS / UNKNOWN / WARNINGS / golden-path line
-- [ ] Every NO-GO carries its `remedy`
-- [ ] Non-decisive checks collapsed to a count
-- [ ] UNKNOWN visually distinct from GO — never the same glyph, never the same color
-- [ ] Exit codes 0/1/2/3 per ARCHITECTURE §11
-- [ ] Degrades in a pipe and in a terminal without color
+- [x] `ferret/render.go` → `status.md` + stdout
+- [x] Ordered by **severity, not by layer** — `Layer` never reaches the output
+- [x] Sections: STACK / VERDICT / BLOCKERS / UNKNOWN / WARNINGS / NOTED /
+      PROPOSED / golden-path line. STACK and PROPOSED are placeholders that
+      state *why* they are empty: "not yet derived" and "nothing needed" are
+      different facts, and confusing them would be a false green in the most
+      prominent position on screen
+- [x] Every NO-GO carries its `remedy`
+- [x] Non-decisive checks collapsed to a count — but a non-decisive check that
+      **failed** gets a NOTED line instead. Collapsing a finding into "7
+      passed" would silently drop it, which is the sin the tool exists to
+      prevent; "does not change the verdict" is not "not worth mentioning"
+- [x] UNKNOWN visually distinct from GO — never the same glyph, never the same color
+      — distinct in *shape* as well as colour, so it survives a pipe, a CI log,
+      and a colourblind reader. Regression-tested by rendering UNKNOWN green
+      and confirming the suite fails
+- [x] Exit codes 0/1/2/3 per ARCHITECTURE §11
+- [x] Degrades in a pipe and in a terminal without color — `NO_COLOR` honoured
 
 **Exit:** output matches the README example shape on a fixture. **Then run it on your actual machine and read it.** If it doesn't tell you something true and useful in ten seconds, fix the format now — not after eighty more checks exist.
+
+**Met.** Run on this machine with nine real checks, in 40ms. It reported two
+true things that were not otherwise visible: an uncommitted working tree, and
+9 duplicate PATH entries. It also confirmed the `~/.netrc` permissions fix from
+earlier in the session.
+
+Four format defects were found by reading the output rather than by testing,
+and fixed before the format could calcify:
+
+  - detail columns were ragged; now aligned to a capped width
+  - VERDICT said "2 unknowns" while the section header said "3", both correct
+    but contradictory-looking; the header now distinguishes decisive from total
+  - tainted lines repeated a full sentence each; now one short phrase
+  - a tainted check named its immediate prerequisite, which is itself a
+    victim; it now names the root cause, so the reader is sent to the thing
+    that actually needs fixing
 
 ---
 

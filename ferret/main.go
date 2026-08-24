@@ -4,10 +4,14 @@
 // This is stage one. Stage zero is ./bootstrap/run.sh, which is POSIX sh and
 // measures the machine before any toolchain exists.
 //
-// As of M1 this is the CAPTURE half only: it loads the manifest, runs the
-// probes, and writes evidence.json. It does not decide anything. The verdict
-// engine (M2) and the renderer (M4) are separate, and the separation is the
-// design -- see docs/design/ARCHITECTURE.md §1.
+// The pipeline is capture -> decide -> render, and the three stay separate:
+// runner.go probes without interpreting, verdict.go decides from evidence.json
+// alone without re-probing, render.go formats without deciding. That
+// separation is the design, not an implementation detail -- see
+// docs/design/ARCHITECTURE.md §1.
+//
+// `-verdict` runs only the last two against stored evidence, which is what
+// makes a changed expectation re-answerable without touching the machine.
 //
 // Go, standard library only. No third-party modules, ever:
 // docs/design/LANGUAGE_CHOICE.md.
@@ -44,10 +48,12 @@ func main() {
 		validate    = flag.Bool("validate", false, "validate the manifest and exit; run no probes")
 		verdictOnly = flag.Bool("verdict", false,
 			"skip probing: read an existing evidence.json and re-decide from it")
+		statusPath = flag.String("status", ".ferret/status.md",
+			"where to write the markdown glance, or empty to skip")
 	)
 	flag.Parse()
 
-	code, err := run(*manifestDir, *outPath, *workDir, *rawDir,
+	code, err := run(*manifestDir, *outPath, *workDir, *rawDir, *statusPath,
 		Redact(*redactFlag), *validate, *verdictOnly)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ferret: %v\n", err)
@@ -56,7 +62,7 @@ func main() {
 	os.Exit(code)
 }
 
-func run(manifestDir, outPath, workDir, rawDir string, redact Redact, validateOnly, verdictOnly bool) (int, error) {
+func run(manifestDir, outPath, workDir, rawDir, statusPath string, redact Redact, validateOnly, verdictOnly bool) (int, error) {
 	switch redact {
 	case RedactNone, RedactIdentity, RedactSecret:
 	default:
@@ -141,35 +147,31 @@ func run(manifestDir, outPath, workDir, rawDir string, redact Redact, validateOn
 		return exitCannot, err
 	}
 
-	printSummary(rep)
+	NewRenderer(os.Stdout).Render(os.Stdout, rep)
+
+	if statusPath != "" {
+		if err := writeStatus(statusPath, rep, ev.StartedAt); err != nil {
+			// A missing status.md is not worth losing the report on screen.
+			fmt.Fprintf(os.Stderr, "ferret: warning: %v\n", err)
+		}
+	}
 
 	// Exit codes are the verdict engine's to set, per ARCHITECTURE §11. The
 	// runner alone never returns 1 or 2, because it has made no judgment.
 	return rep.ExitCode(), nil
 }
 
-// printSummary is a placeholder for M4's renderer.
-//
-// It is deliberately plain: the severity-ordered glance is the product and it
-// gets designed on its own, not smuggled in as a debug print that nobody
-// revisits. This exists so M2 is runnable and verifiable now.
-func printSummary(rep *Report) {
-	for _, v := range rep.Verdicts {
-		line := fmt.Sprintf("%-8s %-28s %s", v.State, v.ID, v.Detail)
-		if v.State == StateUnknown {
-			line = fmt.Sprintf("%-8s %-28s %s: %s", v.State, v.ID, v.Reason, v.Detail)
-		}
-		fmt.Println(line)
-		if v.Remedy != "" {
-			fmt.Printf("         %-28s -> %s\n", "", v.Remedy)
-		}
-		if v.TaintedCount > 0 {
-			fmt.Printf("         %-28s -> taints %d check(s) below\n", "", v.TaintedCount)
-		}
+func writeStatus(path string, rep *Report, capturedAt string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creating status dir: %w", err)
 	}
-	fmt.Printf("\n%d GO  %d NO-GO  %d UNKNOWN  %d N/A\n",
-		rep.Counts[StateGo], rep.Counts[StateNoGo],
-		rep.Counts[StateUnknown], rep.Counts[StateNA])
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("writing status: %w", err)
+	}
+	defer f.Close()
+	RenderMarkdown(f, rep, capturedAt)
+	return nil
 }
 
 func asValidationError(err error, target **ValidationError) bool {

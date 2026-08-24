@@ -60,8 +60,12 @@ type Verdict struct {
 	// "-> taints 38 checks below" instead of printing 38 lines.
 	TaintedCount int
 
-	// TaintedBy names the prerequisite that caused a tainted UNKNOWN.
+	// TaintedBy names the immediate prerequisite that caused a tainted
+	// UNKNOWN. RootCause names the failure at the bottom of the chain, which
+	// is the one worth showing a reader: an intermediate is itself a victim,
+	// and pointing at it sends someone to fix the wrong thing.
 	TaintedBy string
+	RootCause string
 }
 
 // Report is the whole resolved sweep.
@@ -245,7 +249,9 @@ func applyTaint(m *Manifest, resolved map[string]*Verdict) {
 		// The count lands on the original failure rather than on an
 		// intermediate that was itself tainted, so the glance can say
 		// "-> taints 38 checks below" against the thing to actually fix.
-		if cause := resolved[rootCauseOf(v.TaintedBy, resolved)]; cause != nil {
+		root := rootCauseOf(v.TaintedBy, resolved)
+		v.RootCause = root
+		if cause := resolved[root]; cause != nil {
 			cause.TaintedCount++
 		}
 	}
