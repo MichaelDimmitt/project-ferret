@@ -4,7 +4,12 @@
 
 Three stages, strictly ordered. The ordering is the design.
 
+Stage zero comes before all of it: `bootstrap/run.sh` measures the machine with POSIX sh, no Python and no agent, because everything below assumes tools that may not be there. See `docs/design/BOOTSTRAP_PIPELINE.md`.
+
 ```
+  bootstrap/run.sh         stage zero — sh only, no AI, writes default-results.md
+         │
+         ▼
   manifest/*.json          declarative checks — data, not code
          │
          ▼
@@ -232,10 +237,13 @@ If any blocker is outstanding, it refuses to run and says `NOT ATTEMPTED (blocke
 Ferret converges a machine toward operational, and documents as it goes. That requires mutation. The rule is not *never mutate* — it is **never mutate before a clean baseline is written.**
 
 ```
-observe → write baseline → remediate → re-observe → document → (next time) verify
+derive stack → observe → write baseline → propose → approve → remediate → re-observe → document → (next time) verify
 ```
 
 Enforced as follows:
+
+- **Nothing installs before the proposal is approved.** Everything the stack needs and the machine lacks goes into one editable list, with the preferred tool and its ordered fallbacks visible *before* approval. Discovering the second choice at execution time — after approval, when nobody is looking — is the surprise this design exists to prevent. `--approve` accepts as-is; `--edit` drops lines, pins versions, or forces a fallback. See `docs/design/BOOTSTRAP_PIPELINE.md` §4.
+- **The do-not-use list filters before the proposal is built, not after.** A forbidden tool never appears in the list for review. If a ban empties a fallback chain, that surfaces as an honest dead end — *"no remaining option; six checks stay UNKNOWN"* — rather than being quietly worked around. §5.
 
 - **Phase 1 (observe) is read-only, no exceptions.** The mutation denylist and the byte-identical fixture test from §8 apply here in full. This phase must work with nothing but `sh` and coreutils.
 - **The baseline is written before any mutation.** If it can't be written, Ferret exits 3 rather than proceed. This preserves the ability to answer *"was this broken before I got here?"* — which is the entire value of a diagnostic tool.

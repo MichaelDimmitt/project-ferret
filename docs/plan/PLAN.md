@@ -10,11 +10,15 @@ Milestones in dependency order. Each is independently verifiable — you can run
 
 Repo structure, gitignore, agent conventions.
 
-- [ ] `ferret/`, `manifest/`, `docs/`, `tests/fixtures/`
-- [ ] `.gitignore` containing `.ferret/` — **in this commit, before any code can create it**
-- [ ] `AGENTS.md` with repo conventions; `CLAUDE.md` as a one-line pointer to it
-- [ ] `docs/design/FRAMEWORK.md` copied in (source of coverage truth, not executed)
+- [ ] `ferret/`, `manifest/`, `tests/fixtures/`
+- [x] `bootstrap/`, `scripts/`, `docs/design/`, `docs/plan/` — runnable code apart from prose, design docs apart from build plans
+- [x] `.gitignore` containing `.ferret/` — **in this commit, before any code can create it**
+- [x] `AGENTS.md` with repo conventions; `CLAUDE.md` as a one-line pointer to it
+- [x] `docs/design/FRAMEWORK.md` copied in (source of coverage truth, not executed)
 - [ ] `scripts/sweep.sh` stub that shells to `python3 -m ferret`
+
+Note: `bootstrap/run.sh` (stage zero, POSIX sh) and `scripts/sweep.sh` (Python
+entry) are two different entry points and both are expected.
 
 **Exit:** `./scripts/sweep.sh` runs and prints "not implemented" without traceback.
 
@@ -172,10 +176,30 @@ The convergence loop's memory. Requires precise checks (M7+), because a doc buil
 
 ---
 
+## M10.5 — Stack derivation and the approval gate
+
+Before M11, because remediation without an approved plan is the thing this
+tool exists not to do. Specified in `docs/design/BOOTSTRAP_PIPELINE.md`.
+
+- [ ] `ai-preferred-stack.md` — preferred tool per requirement, ordered fallbacks with the cost of each, degrading toward POSIX
+- [ ] `ai-do-not-use-list.md` — standing user policy, applied as a filter *before* the proposal is built
+- [ ] Manifest schema fields for preferred tool, ordered alternatives, install-permission gating — the model has no schema yet
+- [ ] Derive the stack from the repo (lockfiles, `.nvmrc`, compose, CI) and diff against `bootstrap/default-results.md`
+- [ ] Preference is contextual: `mise` already present routes version management through it and shortens the chain
+- [ ] Render the proposal — one editable list, fallbacks visible before approval
+- [ ] `--approve` and `--edit`; no install path bypasses them
+- [ ] Exhausted chain asks the user to pick from what remains; never improvises, never silently skips
+- [ ] Test: a ban that empties a chain produces an honest dead end with the affected checks named, not a workaround
+
+**Exit:** on a machine missing two tools, Ferret proposes both with fallbacks shown, installs nothing until approved, and a `--edit` that removes a line results in that tool not being installed. A do-not-use entry keeps its tool off the list entirely.
+
+---
+
 ## M11 — Remediation
 
 Last of the core work, deliberately. Remediation before the checks are precise is remediation aimed at false positives.
 
+- [ ] Executes only what M10.5's gate approved
 - [ ] `--remediate`, opt-in, never default
 - [ ] **Refuses to run without a written baseline** — exits 3 rather than proceed
 - [ ] Detect OS package manager; select install method by `applies_if`

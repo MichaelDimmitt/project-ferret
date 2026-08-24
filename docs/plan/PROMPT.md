@@ -7,14 +7,17 @@ Paste this to start a session. It is written to be re-pasteable — starting a f
 ## The prompt
 
 ```
-You are building Ferret Sniffer, a status-check tool for the machine it runs on.
+You are building Ferret Sniffer. It fixes the environment on a machine you
+don't fully trust — but it puts its plan on the table before it touches
+anything, and it works from measured state rather than assumption.
 
 Read these before writing code:
-  README.md               — what the tool is and what it refuses to do
-  docs/design/ARCHITECTURE.md    — design decisions and their reasons
-  docs/design/DOCS_MODEL.md      — the three documents, volatility, provenance, baseline rule
-  docs/plan/PLAN.md            — milestones in dependency order
-  docs/design/FRAMEWORK.md       — the evaluation theory the checks derive from
+  README.md                        — what the tool is and what it refuses to do
+  docs/design/ARCHITECTURE.md      — design decisions and their reasons
+  docs/design/BOOTSTRAP_PIPELINE.md — stage zero: measure the machine, then plan
+  docs/design/DOCS_MODEL.md        — the three documents, volatility, provenance, baseline rule
+  docs/plan/PLAN.md                — milestones in dependency order
+  docs/design/FRAMEWORK.md         — the evaluation theory the checks derive from
 
 FRAMEWORK.md is rationale, not a spec. It explains why a check matters.
 The manifest states how to probe and what passes. Never execute from prose.
@@ -44,6 +47,12 @@ INVARIANTS — violating any of these is a failed milestone, not a tradeoff
     byte-identical after a sweep.
   - No mutation anywhere before a clean baseline is written. Ferret exits 3
     rather than remediate without one. Remediation is opt-in (--remediate).
+  - Nothing installs before the proposed list is approved. Everything the
+    stack needs and the machine lacks goes into ONE editable list, with the
+    preferred tool and its ordered fallbacks shown before approval — never
+    discovered at execution time. A forbidden tool never reaches the list.
+  - A fallback chain that runs out asks the user to pick from what's left.
+    It does not improvise, and it does not silently skip.
   - Every fact carries provenance: observed / ferret-installed /
     user-remediated / inferred. Untagged facts make Ferret report its own
     footprint as a finding.
@@ -60,12 +69,16 @@ INVARIANTS — violating any of these is a failed milestone, not a tradeoff
 
 WHAT GOOD LOOKS LIKE
 
-The tool answers one question: can I proceed on this machine right now, and
-if not, what is broken and what do I do about it?
+The tool gets this machine working, and shows its plan first.
 
-Then it helps get there, and writes down what it learned — so the next
-project on this machine starts from what's already known instead of
-rediscovering the box.
+It answers one question — can I proceed here right now, and if not what is
+broken — then proposes exactly what it would install to fix it, waits for
+that list to be approved or edited, does the work, and writes down what it
+learned. The next project on this machine starts from what's already known
+instead of rediscovering the box.
+
+The report is not the product; it is what earns the right to act. An agent
+that hasn't measured will confidently install the wrong thing.
 
 It is read in ten seconds. It is ordered by severity, not by layer. It never
 implies it verified something it could not check.

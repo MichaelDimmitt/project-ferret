@@ -13,6 +13,9 @@ spec — never execute from it.
 - `runner.py` never interprets. If it imports from `verdict.py`, the design is broken.
 - No code path converts UNKNOWN into GO.
 - Phase 1 is read-only. No mutation anywhere before a baseline is written.
+- Nothing installs before the proposed list is approved. Preferred tool and
+  ordered fallbacks are shown *before* approval, never discovered at execution
+  time. A do-not-use entry keeps its tool off the list entirely.
 - Redaction is allowlist, at capture time, in the runner.
 - Every fact carries provenance. Every NO-GO carries a remedy.
 
