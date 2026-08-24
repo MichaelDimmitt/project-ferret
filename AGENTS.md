@@ -2,6 +2,7 @@
 
 Start with `docs/plan/PROMPT.md`. It is the standing instruction for work in this repo.
 `HOW.md` says what to run and in what order.
+`docs/plan/CONTINUE.md` is the re-pasteable prompt for resuming the build.
 
 Reading order: `README.md` → `docs/design/ARCHITECTURE.md` → `docs/design/DOCS_MODEL.md` →
 `docs/plan/PLAN.md`. `docs/design/FRAMEWORK.md` is rationale for coverage decisions, not a

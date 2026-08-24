@@ -162,6 +162,7 @@ docs/plan/     how it gets built — milestones and the standing prompt
 | `docs/design/DOCS_MODEL.md` | The three documents, volatility, provenance, the baseline rule |
 | `docs/plan/PLAN.md` | Milestones, in order |
 | `docs/plan/PROMPT.md` | The instruction handed to Claude Code to execute the plan |
+| `docs/plan/CONTINUE.md` | Re-pasteable prompt to resume the build mid-project |
 | `manifest/*.json` | The checks themselves — the actual contract |
 
 ## Name
