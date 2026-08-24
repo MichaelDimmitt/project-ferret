@@ -1,0 +1,13 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.timeout",
+      "title": "Zero timeout",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "info",
+      "timeout_s": 0
+    }
+  ]
+}

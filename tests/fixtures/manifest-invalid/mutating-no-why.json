@@ -1,0 +1,13 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.mutating_no_why",
+      "title": "Override with no stated reason",
+      "probe": "git config --get remote.origin.url",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "info",
+      "mutating": false
+    }
+  ]
+}

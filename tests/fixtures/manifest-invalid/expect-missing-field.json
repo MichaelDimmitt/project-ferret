@@ -1,0 +1,12 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.expect_missing_field",
+      "title": "one_of with no values",
+      "probe": "uname -m",
+      "expect": { "type": "one_of", "actual": "$probe" },
+      "severity": "info"
+    }
+  ]
+}

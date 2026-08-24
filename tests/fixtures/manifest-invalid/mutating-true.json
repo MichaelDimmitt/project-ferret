@@ -1,0 +1,14 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.mutating_true",
+      "title": "Admits to mutating",
+      "probe": "git fetch origin",
+      "expect": { "type": "exit_code", "of": "probe", "value": 0 },
+      "severity": "info",
+      "mutating": true,
+      "mutating_why": "there is no legal value of true"
+    }
+  ]
+}

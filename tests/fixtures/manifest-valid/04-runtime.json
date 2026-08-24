@@ -1,0 +1,132 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "fixture.equals",
+      "title": "Arch is arm64",
+      "probe": "uname -m",
+      "expect": { "type": "equals", "actual": "$probe", "value": "arm64" },
+      "severity": "warning",
+      "remedy": "no action; this fixture never runs against a real machine",
+      "volatility": "permanent"
+    },
+    {
+      "id": "fixture.matches",
+      "title": "Node major is 20",
+      "applies_if": "test -f package.json",
+      "probe": "node -v 2>/dev/null",
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^v?20\\." },
+      "severity": "blocker",
+      "remedy": "nvm use 20"
+    },
+    {
+      "id": "fixture.matches_invert",
+      "title": "Node is not an odd-numbered release",
+      "probe": "node -v 2>/dev/null",
+      "expect": {
+        "type": "matches",
+        "actual": "$probe",
+        "pattern": "^v?(19|21|23)\\.",
+        "invert": true
+      },
+      "severity": "warning",
+      "remedy": "nvm use 20   # even majors only; odd ones are not LTS"
+    },
+    {
+      "id": "fixture.one_of",
+      "title": "Arch is a supported 64-bit target",
+      "probe": "uname -m",
+      "expect": { "type": "one_of", "actual": "$probe", "values": ["arm64", "aarch64", "x86_64"] },
+      "severity": "blocker",
+      "remedy": "unsupported architecture; no remedy beyond different hardware",
+      "volatility": "permanent"
+    },
+    {
+      "id": "fixture.non_empty",
+      "title": "Origin remote configured",
+      "applies_if": "git rev-parse --git-dir >/dev/null 2>&1",
+      "probe": "git config --get remote.origin.url",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "info",
+      "decisive": false,
+      "mutating": false,
+      "mutating_why": "config --get reads; --set/--add/--unset are the writers",
+      "redact": "identity",
+      "volatility": "stable"
+    },
+    {
+      "id": "fixture.absent",
+      "title": "No proxy configured",
+      "probe": "printenv HTTP_PROXY",
+      "expect": { "type": "absent", "actual": "$probe" },
+      "severity": "info",
+      "decisive": false
+    },
+    {
+      "id": "fixture.numeric_lt",
+      "title": "Clock skew within tolerance",
+      "probe": [
+        "r=$(cat /tmp/does-not-exist 2>/dev/null) || exit 1",
+        "echo 0"
+      ],
+      "expect": { "type": "numeric_lt", "actual": "$probe", "value": 120, "unit": "s" },
+      "severity": "blocker",
+      "remedy": "sudo sntp -sS time.apple.com   # macOS",
+      "timeout_s": 8,
+      "volatility": "volatile"
+    },
+    {
+      "id": "fixture.numeric_gt",
+      "title": "Disk free above floor",
+      "probe": "df -k . | awk 'NR==2 {print $4}'",
+      "expect": { "type": "numeric_gt", "actual": "$probe", "value": 1048576, "unit": "KiB" },
+      "severity": "blocker",
+      "remedy": "free disk space; builds need headroom beyond the checkout",
+      "volatility": "session"
+    },
+    {
+      "id": "fixture.semver",
+      "title": "Node version matches pin",
+      "applies_if": "test -f package.json",
+      "probe": "node -v 2>/dev/null",
+      "declared": "cat .nvmrc 2>/dev/null",
+      "expect": { "type": "semver_satisfies", "actual": "$probe", "range": "$declared" },
+      "severity": "blocker",
+      "tainted_by": ["fixture.matches", "fixture.one_of"],
+      "remedy": "nvm use $declared   # or: mise install",
+      "timeout_s": 10,
+      "volatility": "session"
+    },
+    {
+      "id": "fixture.exit_code",
+      "title": "Registry reachable",
+      "probe": "curl -sfI --max-time 5 https://registry.npmjs.org >/dev/null",
+      "expect": { "type": "exit_code", "of": "probe", "value": 0 },
+      "severity": "warning",
+      "remedy": "check network, proxy, and CA bundle",
+      "timeout_s": 8,
+      "notes": "exit_code is honest here: curl -f collapses every HTTP failure into one code, and the distinction this check cares about is reachable vs not.",
+      "volatility": "volatile"
+    },
+    {
+      "id": "fixture.exit_code_values",
+      "title": "Working tree state readable",
+      "probe": "git diff --quiet",
+      "expect": { "type": "exit_code", "of": "probe", "values": [0, 1] },
+      "severity": "info",
+      "decisive": false,
+      "notes": "0 means clean, 1 means dirty; both are readable. Anything else means git itself failed."
+    },
+    {
+      "id": "fixture.secret",
+      "title": "GH_TOKEN is set",
+      "applies_if": "git remote -v 2>/dev/null | grep -q github.com",
+      "probe": "printenv GH_TOKEN || printenv GITHUB_TOKEN",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "warning",
+      "remedy": "export GH_TOKEN=...   # or: gh auth login",
+      "redact": "secret",
+      "volatility": "expiring"
+    }
+  ]
+}

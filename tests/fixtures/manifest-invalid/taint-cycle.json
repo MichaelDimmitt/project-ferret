@@ -1,0 +1,23 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.cycle_a",
+      "title": "A depends on B",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "warning",
+      "remedy": "n/a",
+      "tainted_by": ["bad.cycle_b"]
+    },
+    {
+      "id": "bad.cycle_b",
+      "title": "B depends on A",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "warning",
+      "remedy": "n/a",
+      "tainted_by": ["bad.cycle_a"]
+    }
+  ]
+}

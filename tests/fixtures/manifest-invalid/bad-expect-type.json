@@ -1,0 +1,12 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.expect_type",
+      "title": "Predicate that does not exist",
+      "probe": "true",
+      "expect": { "type": "contains", "actual": "$probe", "value": "x" },
+      "severity": "info"
+    }
+  ]
+}

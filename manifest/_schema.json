@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MichaelDimmitt/project-ferret/manifest/_schema.json",
+  "title": "Ferret manifest file",
+  "description": "Structural validation for manifest/NN-name.json. The meaning lives in docs/design/MANIFEST_SCHEMA.md; where the two disagree, that is a bug. This file cannot express the cross-file rules -- duplicate ids, dangling tainted_by, cycles, interpolation tokens, remedy-required-unless-info -- because they need the whole manifest set in view. Those are enforced by the loader, and both run before any probe executes. See MANIFEST_SCHEMA.md section 8.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["layer", "checks"],
+  "properties": {
+    "layer": { "$ref": "#/$defs/layer" },
+    "checks": {
+      "type": "array",
+      "description": "May be empty. An empty layer file is legal and means 'nothing here yet'.",
+      "items": { "$ref": "#/$defs/check" }
+    }
+  },
+
+  "$defs": {
+    "layer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "Layer per docs/design/FRAMEWORK.md."
+    },
+
+    "command": {
+      "description": "POSIX sh, executed with sh -c. An array is joined with newlines and passed as one script, so a long probe stays readable in JSON.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      ]
+    },
+
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "probe", "expect", "severity"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)*$",
+          "description": "Unique across the whole manifest, not per file. tainted_by references are global. This is the join key across evidence.json, status.md, and the taint DAG."
+        },
+        "layer": {
+          "$ref": "#/$defs/layer",
+          "description": "Almost always omitted; inherited from the file. Present only when a check genuinely belongs to a different layer than the file storing it -- rare enough to deserve a notes explaining it."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "One line, rendered verbatim. Write the subject, not the outcome: 'Node version matches pin', never 'Node version is wrong'. The state supplies the outcome."
+        },
+        "applies_if": {
+          "$ref": "#/$defs/command",
+          "description": "Exit 0 means the check applies. Non-zero means N/A -- the probe never runs. A dirty failure (timeout, denylist refusal) is UNKNOWN(probe_error), never N/A."
+        },
+        "probe": {
+          "$ref": "#/$defs/command",
+          "description": "The command whose output is the actual state. A non-zero exit is not a failure; expect decides what the exit code means."
+        },
+        "declared": {
+          "$ref": "#/$defs/command",
+          "description": "The command whose output is the expected state, read from the repo. Separate from expect because nearly every check here is declared-vs-actual, so the comparison lives once in the verdict engine."
+        },
+        "expect": { "$ref": "#/$defs/expect" },
+        "severity": {
+          "enum": ["blocker", "warning", "info"],
+          "description": "Describes the failure, not the check. A GO check has no severity in the output."
+        },
+        "decisive": {
+          "type": "boolean",
+          "description": "Whether this check participates in the top-line verdict. Defaults true for blocker, false otherwise. A non-decisive UNKNOWN does not produce exit code 2; a decisive one always does."
+        },
+        "tainted_by": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)*$" },
+          "uniqueItems": true,
+          "description": "Prerequisite ids. Edges point upward, declared on the dependent, so adding a check never requires editing an unrelated one. The probe still runs and its output is still recorded -- taint is a judgment about trustworthiness, not a reason to skip collection."
+        },
+        "remedy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required unless severity is info -- enforced by the loader, not here. A check that reports breakage without an action is half a tool. A wrong remedy is worse than none."
+        },
+        "timeout_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Wall-clock ceiling per command; applies_if, probe, and declared each get the full budget separately. Default 10. Anything touching the network should set this deliberately -- the machines that hang are the ones being diagnosed."
+        },
+        "redact": {
+          "description": "Applied at capture time in the runner, before anything is written. A value that never enters evidence.json cannot leak out of it. Levels agree with scripts/lib/redact.sh.",
+          "oneOf": [
+            {
+              "type": "boolean",
+              "description": "true is identity; false is standard capture with global redaction still applied."
+            },
+            {
+              "enum": ["identity", "secret"],
+              "description": "identity strips user/home/tmpdir/repo. secret is a different rule, not a stronger pass: presence and shape only, never the value."
+            }
+          ]
+        },
+        "mutating": {
+          "const": false,
+          "description": "The mutation denylist escape hatch. Only false is legal -- there is no mutating: true, because a check that admits to mutating does not belong in phase 1. Requires mutating_why."
+        },
+        "mutating_why": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Justification for the override, in the file, next to it. An override without a stated reason is how a denylist rots."
+        },
+        "volatility": {
+          "enum": ["permanent", "stable", "session", "volatile", "expiring"],
+          "description": "Per docs/design/DOCS_MODEL.md section 3. The runner ignores this; it governs how long a derived claim stays trustworthy in system.md. Specified now so M10 need not change the schema after eighty checks exist."
+        },
+        "notes": {
+          "type": "string",
+          "description": "JSON has no comments and a probe that needs explaining should carry the explanation. Nothing reads this."
+        }
+      },
+
+      "allOf": [
+        {
+          "description": "mutating and mutating_why travel together, in both directions.",
+          "if": { "required": ["mutating"] },
+          "then": { "required": ["mutating_why"] }
+        },
+        {
+          "if": { "required": ["mutating_why"] },
+          "then": { "required": ["mutating"] }
+        }
+      ]
+    },
+
+    "expect": {
+      "type": "object",
+      "description": "Read by the verdict engine only. The runner never sees this -- knowing what counts as passing is exactly the interpretation it is forbidden to do. An unevaluable predicate is UNKNOWN(probe_error), never NO-GO: 'the check is broken' and 'the machine is broken' are different findings.",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "equals",
+            "matches",
+            "one_of",
+            "non_empty",
+            "absent",
+            "numeric_lt",
+            "numeric_gt",
+            "semver_satisfies",
+            "exit_code"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "equals" } }, "required": ["type"] },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "actual", "value"],
+            "properties": {
+              "type": { "const": "equals" },
+              "actual": { "type": "string", "minLength": 1 },
+              "value": { "type": "string" }
+            },
+            "description": "Exact comparison after trimming both operands. Internal whitespace is significant."
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "matches" } }, "required": ["type"] },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "actual", "pattern"],
+            "properties": {
+              "type": { "const": "matches" },
+              "actual": { "type": "string", "minLength": 1 },
+              "pattern": { "type": "string", "format": "regex", "minLength": 1 },
+              "invert": { "type": "boolean" }
+            },
+            "description": "Go regexp (RE2), unanchored unless the pattern anchors itself. An invalid pattern is a load-time validation error, not a runtime UNKNOWN."
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "one_of" } }, "required": ["type"] },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "actual", "values"],
+            "properties": {
+              "type": { "const": "one_of" },
+              "actual": { "type": "string", "minLength": 1 },
+              "values": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "non_empty" } }, "required": ["type"] },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "actual"],
+            "properties": {
+              "type": { "const": "non_empty" },
+              "actual": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "absent" } }, "required": ["type"] },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "actual"],
+            "properties": {
+              "type": { "const": "absent" },
+              "actual": { "type": "string", "minLength": 1 }
+            },
+            "description": "Spelled separately rather than as invert on non_empty, because an inverted presence check reads backwards at the call site and the manifest is meant to be skimmable."
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "enum": ["numeric_lt", "numeric_gt"] } },
+            "required": ["type"]
+          },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "actual", "value"],
+            "properties": {
+              "type": { "enum": ["numeric_lt", "numeric_gt"] },
+              "actual": { "type": "string", "minLength": 1 },
+              "value": { "type": "number" },
+              "unit": {
+                "type": "string",
+                "description": "Purely for rendering."
+              }
+            },
+            "description": "Non-numeric input is UNKNOWN(probe_error), not NO-GO -- a probe returning 'command not found' on stdout is Ferret's bug, not a disk-space finding."
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "semver_satisfies" } }, "required": ["type"] },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "actual", "range"],
+            "properties": {
+              "type": { "const": "semver_satisfies" },
+              "actual": { "type": "string", "minLength": 1 },
+              "range": { "type": "string" }
+            },
+            "description": "Supported syntax is deliberately small: prefix, ^, ~, comparators, || , *. Anything beyond it is UNKNOWN(probe_error) with the unparsed range in the reason, never a guess. An empty range -- a declared that found nothing -- is also UNKNOWN: nothing was declared, so nothing can be satisfied, and that is a different fact from a wrong version."
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "exit_code" } }, "required": ["type"] },
+          "then": {
+            "additionalProperties": false,
+            "required": ["type", "of"],
+            "properties": {
+              "type": { "const": "exit_code" },
+              "of": { "enum": ["probe", "declared"] },
+              "value": { "type": "integer" },
+              "values": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "integer" },
+                "uniqueItems": true
+              }
+            },
+            "oneOf": [
+              { "required": ["value"] },
+              { "required": ["values"] }
+            ],
+            "description": "The escape hatch, used sparingly. Every use is logic that moved from the manifest into shell, where it is neither validated nor re-runnable against old evidence. When it is the honest answer, say why in notes."
+          }
+        }
+      ]
+    }
+  }
+}

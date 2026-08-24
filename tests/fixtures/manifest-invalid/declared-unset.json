@@ -1,0 +1,13 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.declared_unset",
+      "title": "Compares against a field that was never captured",
+      "probe": "node -v",
+      "expect": { "type": "semver_satisfies", "actual": "$probe", "range": "$declared" },
+      "severity": "blocker",
+      "remedy": "n/a"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.unknown_field",
+      "title": "Typo in an optional field silently defaults",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "info",
+      "timout_s": 30
+    }
+  ]
+}

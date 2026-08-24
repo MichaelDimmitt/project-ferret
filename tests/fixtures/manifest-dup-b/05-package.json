@@ -1,0 +1,12 @@
+{
+  "layer": 5,
+  "checks": [
+    {
+      "id": "dup.across_files",
+      "title": "Defined again in layer 5",
+      "probe": "false",
+      "expect": { "type": "absent", "actual": "$probe" },
+      "severity": "info"
+    }
+  ]
+}

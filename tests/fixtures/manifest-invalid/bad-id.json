@@ -1,0 +1,12 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "Bad.Mixed-Case",
+      "title": "Id outside the pattern",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "info"
+    }
+  ]
+}

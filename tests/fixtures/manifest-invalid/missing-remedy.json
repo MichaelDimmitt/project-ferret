@@ -1,0 +1,12 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.missing_remedy",
+      "title": "Blocker with no action to take",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "blocker"
+    }
+  ]
+}

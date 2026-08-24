@@ -1,0 +1,14 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.unknown_token",
+      "title": "Uses arithmetic the schema does not define",
+      "probe": "date +%s",
+      "expect": { "type": "numeric_lt", "actual": "$skew_abs", "value": 120 },
+      "severity": "blocker",
+      "remedy": "n/a",
+      "notes": "This is MANIFEST_SCHEMA.md section 9's deliberately-wrong example."
+    }
+  ]
+}

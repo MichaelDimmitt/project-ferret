@@ -1,0 +1,12 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.regex",
+      "title": "Unclosed group",
+      "probe": "node -v",
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^v?(20\\." },
+      "severity": "info"
+    }
+  ]
+}

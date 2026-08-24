@@ -1,0 +1,14 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.dangling_taint",
+      "title": "Depends on a check that does not exist",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "warning",
+      "remedy": "n/a",
+      "tainted_by": ["bad.no_such_check"]
+    }
+  ]
+}

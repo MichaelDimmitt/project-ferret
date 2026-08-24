@@ -1,0 +1,19 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "bad.duplicate",
+      "title": "First definition",
+      "probe": "true",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "info"
+    },
+    {
+      "id": "bad.duplicate",
+      "title": "Second definition, same id",
+      "probe": "false",
+      "expect": { "type": "absent", "actual": "$probe" },
+      "severity": "info"
+    }
+  ]
+}
