@@ -1,0 +1,83 @@
+{
+  "layer": 6,
+  "checks": [
+    {
+      "id": "git.present",
+      "title": "Git is installed",
+      "probe": "command -v git >/dev/null 2>&1 && echo present || echo absent",
+      "expect": { "type": "equals", "actual": "$probe", "value": "present" },
+      "severity": "blocker",
+      "remedy": "Install git (macOS: xcode-select --install; Debian: apt install git)",
+      "volatility": "stable",
+      "notes": "The root of this layer's taint chain. Every check below asks git a question, so if git is absent they would all fail for the same reason and report four findings where there is one."
+    },
+    {
+      "id": "git.repo.is_repo",
+      "title": "Working directory is a git repository",
+      "applies_if": "command -v git >/dev/null 2>&1",
+      "probe": "git rev-parse --is-inside-work-tree 2>/dev/null || echo no",
+      "expect": { "type": "equals", "actual": "$probe", "value": "true" },
+      "severity": "info",
+      "decisive": false,
+      "tainted_by": ["git.present"],
+      "volatility": "stable",
+      "notes": "Info rather than blocker: a directory that is not a repo is a legitimate thing to run against, and calling it a failure would cry wolf. It exists to gate the checks below, which are meaningless outside a repo. Non-decisive so it never blocks the verdict on its own."
+    },
+    {
+      "id": "git.repo.mid_operation",
+      "title": "No rebase or merge in progress",
+      "applies_if": "git rev-parse --git-dir >/dev/null 2>&1",
+      "probe": [
+        "d=$(git rev-parse --git-dir 2>/dev/null)",
+        "if [ -d \"$d/rebase-merge\" ] || [ -d \"$d/rebase-apply\" ]; then echo rebase",
+        "elif [ -f \"$d/MERGE_HEAD\" ]; then echo merge",
+        "elif [ -f \"$d/CHERRY_PICK_HEAD\" ]; then echo cherry-pick",
+        "elif [ -f \"$d/BISECT_LOG\" ]; then echo bisect",
+        "else echo clean; fi"
+      ],
+      "expect": { "type": "equals", "actual": "$probe", "value": "clean" },
+      "severity": "blocker",
+      "remedy": "Finish or abort the operation: git rebase --continue / --abort (or merge, cherry-pick, bisect)",
+      "tainted_by": ["git.present", "git.repo.is_repo"],
+      "volatility": "session",
+      "notes": "A taint source for everything about the working tree. Mid-operation, the checkout is a synthetic state belonging to no branch, so a build result, a lockfile, or a dependency tree measured now describes nothing that will exist afterwards. Detected by the marker files git itself uses, which is how git's own prompt scripts do it."
+    },
+    {
+      "id": "git.repo.dirty",
+      "title": "Working tree is clean",
+      "applies_if": "git rev-parse --is-inside-work-tree >/dev/null 2>&1",
+      "probe": "git status --porcelain 2>/dev/null | wc -l | tr -d ' '",
+      "expect": { "type": "equals", "actual": "$probe", "value": "0" },
+      "severity": "warning",
+      "decisive": false,
+      "remedy": "Commit or stash before trusting a build result",
+      "tainted_by": ["git.present", "git.repo.is_repo", "git.repo.mid_operation"],
+      "volatility": "volatile",
+      "notes": "Warning and non-decisive on purpose: an uncommitted working tree is the normal state of active development, and blocking on it would make the tool useless during exactly the work it is meant to support. It is reported because a green build from a dirty tree is not reproducible by anyone else. Counts changed paths rather than listing them -- filenames can be sensitive, and the count is what the reader acts on."
+    },
+    {
+      "id": "git.repo.shallow",
+      "title": "Repository has full history",
+      "applies_if": "git rev-parse --git-dir >/dev/null 2>&1",
+      "probe": "git rev-parse --is-shallow-repository 2>/dev/null || echo unknown",
+      "expect": { "type": "equals", "actual": "$probe", "value": "false" },
+      "severity": "warning",
+      "remedy": "git fetch --unshallow",
+      "tainted_by": ["git.present", "git.repo.is_repo"],
+      "volatility": "stable",
+      "notes": "A shallow clone breaks anything that walks history: git describe, changelog generation, tag-derived versions, and release tooling that counts commits since a tag. CI checkouts are shallow by default, so this is common and usually invisible until a version string comes out wrong. 'unknown' from an older git falls out of equals and resolves NO-GO with an actionable remedy, which is the honest outcome when we cannot confirm full history."
+    },
+    {
+      "id": "git.config.safe_directory",
+      "title": "Repository is not blocked by safe.directory",
+      "applies_if": "git rev-parse --git-dir >/dev/null 2>&1",
+      "probe": "git status --porcelain >/dev/null 2>&1 && echo ok || git status 2>&1 | grep -c 'dubious ownership'",
+      "expect": { "type": "equals", "actual": "$probe", "value": "ok" },
+      "severity": "blocker",
+      "remedy": "git config --global --add safe.directory \"$(pwd)\"",
+      "tainted_by": ["git.present", "git.repo.is_repo"],
+      "volatility": "stable",
+      "notes": "Git refuses to operate on a repo owned by another user, which is routine in containers, on mounted volumes, and after a sudo checkout. The failure message names 'dubious ownership' and stops every git command dead, so without this check every other git probe here fails with no explanation. Detects by trying a harmless command and inspecting the failure, because there is no direct query for 'would git refuse this'."
+    }
+  ]
+}

@@ -327,7 +327,15 @@ func (r *Runner) exec(ctx context.Context, c *Check, script string, timeout floa
 	// user's .zshrc gets reported GO, and CI -- which never sources it --
 	// cannot find the tool at all. That is a green that does not survive
 	// contact with the build machine.
-	if c.Isolate != nil && *c.Isolate {
+	//
+	// THE GATE IS NEVER ISOLATED. applies_if decides RELEVANCE -- is this
+	// machine in scope for the question -- while probe measures the ANSWER.
+	// Isolating the gate makes a fresh-shell check self-cancelling: "does node
+	// survive a clean environment" gates on finding node in a clean
+	// environment, fails, and resolves N/A without ever asking. The check
+	// could then never fire, which is a silent gap rather than a finding.
+	// Observed exactly that way before this line existed.
+	if phase != "applies_if" && c.Isolate != nil && *c.Isolate {
 		cmd.Env = isolatedEnv()
 	}
 

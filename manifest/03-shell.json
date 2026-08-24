@@ -1,0 +1,58 @@
+{
+  "layer": 3,
+  "checks": [
+    {
+      "id": "shell.path.duplicates",
+      "title": "PATH has no duplicate entries",
+      "probe": [
+        "n=$(printf '%s' \"$PATH\" | tr ':' '\\n' | grep -c .)",
+        "u=$(printf '%s' \"$PATH\" | tr ':' '\\n' | grep . | sort -u | wc -l | tr -d ' ')",
+        "echo $((n - u))"
+      ],
+      "expect": { "type": "equals", "actual": "$probe", "value": "0" },
+      "severity": "warning",
+      "remedy": "De-duplicate PATH in your shell rc; usually an rc file sourced twice",
+      "volatility": "session",
+      "notes": "Duplicates are rarely fatal but they are a reliable symptom: an rc file sourced twice, or a version manager initialised in both .zshrc and .zprofile. That same double-initialisation is what produces the version-manager conflicts in layer 4, so this is worth surfacing before those checks confuse someone. Reports the count of duplicates rather than listing them, because the paths are machine-identifying."
+    },
+    {
+      "id": "shell.path.node_shadowing",
+      "title": "Node resolves to one install",
+      "applies_if": "command -v node >/dev/null 2>&1",
+      "probe": [
+        "IFS=:; for d in $PATH; do",
+        "  [ -n \"$d\" ] || d=.",
+        "  [ -x \"$d/node\" ] && printf '%s\\n' \"$d/node\"",
+        "done | sort -u | wc -l | tr -d ' '"
+      ],
+      "expect": { "type": "equals", "actual": "$probe", "value": "1" },
+      "severity": "warning",
+      "remedy": "Remove the shadowing install, or fix PATH order so the intended node wins",
+      "volatility": "session",
+      "notes": "Two node binaries on PATH is the classic 'works in my terminal, fails in the script' cause: an interactive shell picks the nvm one, a non-interactive script picks /usr/local/bin. Walks PATH directly because `command -v -a` is a BASHISM -- macOS /bin/sh rejects it with 'invalid option', the error goes to stderr, and `wc -l` then counts zero, reporting 'no installs' for a tool that is plainly installed. That false answer shipped in the first draft of this file and was caught by reading the captured evidence rather than the rendered verdict. sort -u collapses duplicate PATH entries pointing at one binary, so this counts distinct installs. Deliberately NOT isolated: the question is what THIS shell resolves, and clearing the environment would answer a different one."
+    },
+    {
+      "id": "shell.path.node_fresh_shell",
+      "title": "Node is on PATH in a clean environment",
+      "applies_if": "command -v node >/dev/null 2>&1",
+      "probe": "command -v node >/dev/null 2>&1 && echo found || echo missing",
+      "isolate": true,
+      "expect": { "type": "equals", "actual": "$probe", "value": "found" },
+      "severity": "warning",
+      "remedy": "Install node system-wide, or configure the version manager in a non-interactive-safe rc (.zshenv / .profile)",
+      "volatility": "session",
+      "notes": "The .zshrc false negative, checked directly. applies_if runs unisolated by rule (MANIFEST_SCHEMA.md: the gate decides relevance, the probe measures the answer), so this asks: given node exists in your shell, does it still exist without your dotfiles? A no means CI, cron, and any non-interactive script will not find it, while your terminal works perfectly. That rule was written because of this check -- when the gate was isolated too, it failed in the clean environment and the check resolved N/A, silently skipping the exact problem it exists to detect."
+    },
+    {
+      "id": "shell.rc.no_output",
+      "title": "Shell startup prints nothing to stdout",
+      "probe": "sh -lc 'true' 2>/dev/null | wc -c | tr -d ' '",
+      "expect": { "type": "equals", "actual": "$probe", "value": "0" },
+      "severity": "warning",
+      "remedy": "Move echo/banner output in your shell rc behind an interactive guard: case $- in *i*) ... esac",
+      "timeout_s": 15,
+      "volatility": "session",
+      "notes": "An rc file that echoes a banner corrupts every command substitution in every script that starts a login shell -- $(ssh host cat file) silently gains a line. It is a real and under-diagnosed breakage. Measures bytes rather than capturing the text, because the text may contain machine-identifying detail. A generous timeout: a slow rc is itself common and killing it would report the wrong finding."
+    }
+  ]
+}

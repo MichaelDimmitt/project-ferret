@@ -280,10 +280,24 @@ override. An override without a stated reason is how a denylist rots.
 
 ### `isolate` — optional, literal `true`
 
-Runs the check's commands under a cleared environment — `env -i` in spirit,
+Runs `probe` and `declared` under a cleared environment — `env -i` in spirit,
 implemented as an explicitly constructed environment rather than an inherited
 one. Only `true` is legal: `"isolate": false` is the default and states
 nothing, so writing it is noise.
+
+**`applies_if` is never isolated**, even here. The gate decides *relevance* —
+is this machine in scope for the question — while the probe measures the
+*answer*. Isolating the gate makes a fresh-shell check self-cancelling:
+
+```json
+"applies_if": "command -v node",   // real env: found, so the check applies
+"probe":      "command -v node",   // isolated: NOT found -> the finding
+"isolate":    true
+```
+
+Isolate the gate too and it fails in the clean environment, the check resolves
+N/A, and the very problem it was written to detect is silently skipped. This
+was observed before the rule existed, in `shell.path.node_fresh_shell`.
 
 The environment the check receives is `PATH` (set to a fixed, conservative
 value), `HOME`, and nothing else. Not `NODE_OPTIONS`, not `NVM_DIR`, not

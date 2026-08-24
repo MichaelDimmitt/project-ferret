@@ -1,0 +1,71 @@
+{
+  "layer": 0,
+  "checks": [
+    {
+      "id": "machine.clock.skew",
+      "title": "Clock is close to network time",
+      "probe": [
+        "remote=$(curl -sI --max-time 5 https://example.com 2>/dev/null |",
+        "  grep -i '^date:' | cut -d' ' -f2- | tr -d '\\r')",
+        "[ -n \"$remote\" ] || exit 3",
+        "r=$(date -u -d \"$remote\" '+%s' 2>/dev/null ||",
+        "    date -u -j -f '%a, %d %b %Y %H:%M:%S %Z' \"$remote\" '+%s' 2>/dev/null) || exit 4",
+        "l=$(date -u '+%s')",
+        "s=$((l - r)); [ \"$s\" -lt 0 ] && s=$((-s))",
+        "echo \"$s\""
+      ],
+      "expect": { "type": "numeric_lt", "actual": "$probe", "value": 300, "unit": "s" },
+      "severity": "blocker",
+      "remedy": "Enable automatic time sync (macOS: System Settings > General > Date & Time; Linux: timedatectl set-ntp true)",
+      "timeout_s": 8,
+      "volatility": "volatile",
+      "notes": "The canonical taint source. Skew past a few minutes fails TLS handshakes, expires freshly-issued tokens, and makes 'git log' timestamps lie -- each of which looks like a different bug. Exits 3/4 rather than printing a number when it cannot measure, so numeric_lt sees non-numeric input and resolves UNKNOWN(probe_error) rather than a false 0. 300s matches the fallback in ferret/bootstrap.sh; Kerberos uses 300s and it is the most defensible round number available."
+    },
+    {
+      "id": "machine.disk.free",
+      "title": "Disk space available",
+      "probe": "df -Pk . | awk 'NR==2 {print int($4/1024)}'",
+      "expect": { "type": "numeric_gt", "actual": "$probe", "value": 500, "unit": "MB" },
+      "severity": "blocker",
+      "remedy": "Free space on this volume, then re-run",
+      "volatility": "volatile",
+      "notes": "-P forces POSIX output: without it a long device name wraps onto a second line and the column offsets move, so $4 is the wrong field. Reports the volume holding the repo, not /. 500MB is a floor for a node_modules install plus a build, not a comfortable margin."
+    },
+    {
+      "id": "machine.disk.inodes",
+      "title": "Inodes available",
+      "applies_if": "df -Pi . >/dev/null 2>&1",
+      "probe": "df -Pi . | awk 'NR==2 {gsub(/%/,\"\",$8); print $8}'",
+      "expect": { "type": "numeric_lt", "actual": "$probe", "value": 95, "unit": "%" },
+      "severity": "blocker",
+      "remedy": "Delete unused files or node_modules trees on this volume",
+      "volatility": "volatile",
+      "notes": "Inode exhaustion is indistinguishable from a full disk to npm, while df -h shows plenty of bytes free -- which is why it is worth a separate check rather than folding into disk.free. applies_if gates it because not every filesystem reports inode usage (some network and overlay mounts do not), and N/A is the honest answer there rather than a fabricated percentage."
+    },
+    {
+      "id": "machine.arch",
+      "title": "CPU architecture",
+      "probe": "uname -m",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "info",
+      "volatility": "permanent",
+      "notes": "Recorded, not judged: no architecture is wrong in itself. It is here because it decides whether a prebuilt binary or a platform-specific optional dependency can run at all, and because M10 wants it as a permanent fact. An arm64 machine pulling x86_64 binaries is a real failure, but that check belongs to the layer that knows what is being installed."
+    },
+    {
+      "id": "machine.libc",
+      "title": "C library flavour",
+      "applies_if": "[ \"$(uname -s)\" = Linux ]",
+      "probe": [
+        "if [ -f /etc/alpine-release ]; then echo musl",
+        "elif ldd --version 2>&1 | grep -qi musl; then echo musl",
+        "elif ldd --version 2>&1 | grep -qi 'glibc\\|gnu libc'; then echo glibc",
+        "else echo unknown; fi"
+      ],
+      "expect": { "type": "one_of", "actual": "$probe", "values": ["glibc", "musl"] },
+      "severity": "warning",
+      "remedy": "Determine the libc flavour manually: ldd --version",
+      "volatility": "permanent",
+      "notes": "musl vs glibc decides whether a prebuilt native module runs or dies with a cryptic symbol error -- the single most common cause of 'works on my machine, not in Alpine'. macOS is N/A rather than a third value: it has no libc flavour in this sense, and inventing one would make the field mean two different things. 'unknown' falls out of one_of and resolves NO-GO with a remedy, because an unidentifiable libc on Linux is a real gap in what we can promise."
+    }
+  ]
+}

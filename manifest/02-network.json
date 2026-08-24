@@ -1,0 +1,68 @@
+{
+  "layer": 2,
+  "checks": [
+    {
+      "id": "network.proxy.case_conflict",
+      "title": "Proxy variables agree in both cases",
+      "probe": [
+        "for n in http_proxy https_proxy no_proxy; do",
+        "  u=$(printf '%s' \"$n\" | tr '[:lower:]' '[:upper:]')",
+        "  eval \"lo=\\${$n:-}\"; eval \"hi=\\${$u:-}\"",
+        "  if [ -n \"$lo\" ] && [ -n \"$hi\" ] && [ \"$lo\" != \"$hi\" ]; then",
+        "    echo \"$n and $u disagree\"",
+        "  fi",
+        "done"
+      ],
+      "expect": { "type": "absent", "actual": "$probe" },
+      "severity": "blocker",
+      "remedy": "Unset one of each pair so the lowercase and uppercase forms agree",
+      "volatility": "session",
+      "notes": "curl reads lowercase, most JVM and .NET tooling reads uppercase, and Node reads both inconsistently across versions. When they disagree, half your tools egress through the proxy and half do not -- which presents as intermittent, tool-specific network failure and is nearly impossible to diagnose from the symptom. Only reports a conflict when BOTH are set and differ: setting one alone is normal and correct."
+    },
+    {
+      "id": "network.proxy.set",
+      "title": "Proxy configuration in effect",
+      "probe": [
+        "for n in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do",
+        "  eval \"v=\\${$n:-}\"",
+        "  [ -n \"$v\" ] && echo \"$n\"",
+        "done"
+      ],
+      "expect": { "type": "absent", "actual": "$probe" },
+      "severity": "info",
+      "decisive": false,
+      "redact": "identity",
+      "volatility": "session",
+      "notes": "Not a problem -- a proxy is normal on a corporate network. It is recorded because it changes what every later network failure means: a registry timeout behind a proxy is a proxy question, not a registry question. Names the variables only, never their values, which can carry credentials in the userinfo field. Non-decisive: this never blocks, it annotates."
+    },
+    {
+      "id": "network.ca.bundle_readable",
+      "title": "CA bundle variables point at readable files",
+      "probe": [
+        "for n in SSL_CERT_FILE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE CURL_CA_BUNDLE; do",
+        "  eval \"v=\\${$n:-}\"",
+        "  [ -n \"$v\" ] || continue",
+        "  [ -r \"$v\" ] || echo \"$n\"",
+        "done"
+      ],
+      "expect": { "type": "absent", "actual": "$probe" },
+      "severity": "blocker",
+      "remedy": "Unset the named variable, or point it at a readable CA bundle",
+      "volatility": "session",
+      "notes": "A CA variable pointing at a path that does not exist breaks every HTTPS call with a TLS error that names certificates rather than the variable, so the reader looks at the wrong layer entirely. Tests readability only -- never opens the bundle. Prints the variable NAME on failure, not the path, because the path is machine-specific and the name is what you act on."
+    },
+    {
+      "id": "network.registry.reachable",
+      "title": "npm registry is reachable",
+      "applies_if": "test -f package.json",
+      "probe": "curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://registry.npmjs.org/ 2>&1",
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^(200|301|302|304)$" },
+      "severity": "blocker",
+      "remedy": "Check network access to registry.npmjs.org (proxy, VPN, or firewall)",
+      "timeout_s": 12,
+      "tainted_by": ["network.proxy.case_conflict", "network.ca.bundle_readable", "machine.clock.skew"],
+      "volatility": "volatile",
+      "notes": "Gated on package.json: an unreachable npm registry is not a finding in a repo that never calls npm. Tainted by proxy, CA, and clock because each makes this fail for a reason that is not the registry -- and reporting 'registry unreachable' when the real cause is 500s of clock skew sends the reader to the wrong problem. timeout_s exceeds the curl --max-time so the runner records curl's own answer rather than killing it first."
+    }
+  ]
+}

@@ -293,11 +293,46 @@ coverage depends on the tester's shell config is not a test.
 
 Now the schema is proven. Populate the highest-value layers.
 
-**Tier 1 — fast, foundational, taint sources:**
-- [ ] Clock skew, disk free, inodes, arch, libc flavor
-- [ ] PATH shadowing (`which -a` on each key tool)
-- [ ] Proxy vars incl. lowercase twins, CA bundle, `NODE_EXTRA_CA_CERTS`
-- [ ] Git repo state: HEAD, dirty, mid-rebase/merge, `safe.directory`, shallow/sparse, submodules, LFS
+**Tier 1 — fast, foundational, taint sources:** *(landed — 19 checks across
+layers 0, 2, 3, 6)*
+- [x] Clock skew, disk free, inodes, arch, libc flavor
+- [x] PATH shadowing — walks `$PATH` explicitly, **not** `which -a`/`command
+      -v -a`; see the POSIX note below
+- [x] Proxy vars incl. lowercase twins, CA bundle, `NODE_EXTRA_CA_CERTS`
+- [x] Git repo state: HEAD, dirty, mid-rebase/merge/cherry-pick/bisect,
+      `safe.directory`, shallow. **Submodules and LFS deferred to M8** —
+      both need a repo that has them to test against, and an untested check
+      is how a false positive ships
+
+**Run on this machine, and it reported four true things**, each confirmed
+independently before being believed: 10 duplicate PATH entries, 3 distinct
+node installs (including a v12 shadowed behind v24), node entirely absent
+from a clean environment, and a dirty working tree. The two node findings are
+the kind of thing the tool exists for — invisible in normal use, and the
+direct cause of "works in my terminal, fails in CI".
+
+**Three defects found, all by reading output rather than by testing:**
+
+1. `command -v -a` is a **bashism**. macOS `/bin/sh` rejects it, the error
+   goes to stderr, and `| wc -l` counted zero — so the check reported "no
+   node installs" on a machine with three. A false answer that rendered as a
+   confident pass. Probes are POSIX sh; `sh` is not bash.
+2. `isolate` was applying to `applies_if`, which made the fresh-shell check
+   **self-cancelling**: the gate failed in the clean environment, the check
+   resolved N/A, and the exact problem it was written to detect was silently
+   skipped. Settled by asking rather than picking: the gate decides
+   *relevance*, the probe measures the *answer*. Now specified in
+   MANIFEST_SCHEMA.md and pinned by `TestGateIsNeverIsolated`.
+3. **Over-tainting buried the real findings.** Both node checks were declared
+   `tainted_by: shell.path.duplicates`, so the two most useful facts on this
+   machine rendered as "untrustworthy" UNKNOWNs under a GO verdict. Duplicate
+   PATH entries do not invalidate a *de-duplicated* count. Taint means "this
+   answer cannot be trusted", not "something related also failed" — recorded
+   in `manifest/README.md`.
+
+**Cross-checked against `ferret/bootstrap.sh`**, which implements the same
+Tier-1 area independently in shell. Both agree on every overlapping value.
+That is the payoff for the duplication M6 accepted deliberately.
 
 **Layer 4 — runtime vs pin:**
 - [ ] `.nvmrc` / `.node-version` / `engines` / `packageManager` / `.tool-versions` vs actual

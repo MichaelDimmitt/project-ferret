@@ -93,6 +93,45 @@ func TestIsolatedProbeKeepsHome(t *testing.T) {
 	}
 }
 
+// The gate is never isolated, even when the check is.
+//
+// A fresh-shell check gates on the tool existing in the REAL environment and
+// then measures whether it survives a clean one. Isolating the gate makes that
+// self-cancelling: it fails in the clean env, the check resolves N/A, and the
+// problem it exists to find is silently skipped. Observed in
+// shell.path.node_fresh_shell before the rule existed.
+func TestGateIsNeverIsolated(t *testing.T) {
+	t.Setenv("FERRET_TEST_GATE_VAR", "present")
+
+	r := &Runner{
+		Manifest: &Manifest{Checks: []Check{{
+			ID: "gate.unisolated",
+			// Passes only in the real environment.
+			AppliesIf: Command{Set: true, Script: `[ -n "${FERRET_TEST_GATE_VAR:-}" ]`},
+			// Reports what the clean environment sees.
+			Probe:   Command{Set: true, Script: `printenv FERRET_TEST_GATE_VAR || echo ABSENT`},
+			Isolate: isolated(),
+		}}},
+		WorkDir: t.TempDir(),
+		Version: "test",
+	}
+	ev, err := r.Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	rec := ev.Records[0]
+	if !rec.Applies {
+		t.Fatal("the gate was isolated: the check resolved N/A and could never fire")
+	}
+	if rec.Probe == nil {
+		t.Fatal("probe did not run")
+	}
+	if !strings.Contains(rec.Probe.Stdout, "ABSENT") {
+		t.Errorf("the probe should still be isolated, got %q", rec.Probe.Stdout)
+	}
+}
+
 // isolate: false is rejected rather than ignored. A reader who writes it
 // believes it does something.
 func TestIsolateFalseIsRejected(t *testing.T) {
