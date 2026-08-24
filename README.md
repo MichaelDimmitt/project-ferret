@@ -111,7 +111,7 @@ Plus `evidence.json` — raw probe results, not for reading, for when a line in 
 
 **Prior documents are inputs, not just outputs.** The tenth project on a known machine re-verifies a handful of volatile facts instead of rediscovering the box, then proposes only the delta: *"this machine has everything except Postgres."* Claims carry a volatility class, and a stale claim reads as UNKNOWN, never GO.
 
-See `docs/DOCS_MODEL.md`.
+See `docs/design/DOCS_MODEL.md`.
 
 ## The verdict
 
@@ -121,19 +121,34 @@ Everything before that is preflight — cheap checks that *explain* a failure an
 
 ## Status
 
-Early. See `docs/PLAN.md` for milestones and `docs/ARCHITECTURE.md` for the design.
+Early. See `docs/plan/PLAN.md` for milestones and `docs/design/ARCHITECTURE.md` for the design.
 
-> **Known gap:** the preferred-tool / fallback-chain model described above is not yet in the manifest schema. `docs/ARCHITECTURE.md` and `manifest/*.json` need fields for preferred tool, ordered alternatives, and install-permission gating.
+> **Known gap:** the preferred-tool / fallback-chain model described above is not yet in the manifest schema. `docs/design/ARCHITECTURE.md` and `manifest/*.json` need fields for preferred tool, ordered alternatives, and install-permission gating.
+
+## Layout
+
+Runnable code and prose are kept apart, and the prose is split by what it's for.
+
+```
+bootstrap/     stage zero — measure this machine before anything else runs
+ferret/        the Python runner, verdict engine, renderer
+manifest/      the checks, as data
+scripts/       shell entry points and committed reference scripts
+tests/         fixtures and tests
+docs/design/   how the system works — architecture, theory, doc model
+docs/plan/     how it gets built — milestones and the standing prompt
+```
 
 ## Documents
 
 | File | Role |
 |---|---|
-| `docs/FRAMEWORK.md` | The evaluation theory — layers, ambient vs declared, why first passes fail |
-| `docs/ARCHITECTURE.md` | How Ferret is built and why |
-| `docs/DOCS_MODEL.md` | The three documents, volatility, provenance, the baseline rule |
-| `docs/PLAN.md` | Milestones, in order |
-| `docs/PROMPT.md` | The instruction handed to Claude Code to execute the plan |
+| `docs/design/FRAMEWORK.md` | The evaluation theory — layers, ambient vs declared, why first passes fail |
+| `docs/design/ARCHITECTURE.md` | How Ferret is built and why |
+| `docs/design/BOOTSTRAP_PIPELINE.md` | The five documents: measure the machine with a script, then plan against it |
+| `docs/design/DOCS_MODEL.md` | The three documents, volatility, provenance, the baseline rule |
+| `docs/plan/PLAN.md` | Milestones, in order |
+| `docs/plan/PROMPT.md` | The instruction handed to Claude Code to execute the plan |
 | `manifest/*.json` | The checks themselves — the actual contract |
 
 ## Name
