@@ -1,0 +1,101 @@
+{
+  "layer": 4,
+  "checks": [
+    {
+      "id": "runtime.node.present",
+      "title": "Node is installed",
+      "applies_if": "test -f package.json",
+      "probe": "command -v node >/dev/null 2>&1 && echo present || echo absent",
+      "expect": { "type": "equals", "actual": "$probe", "value": "present" },
+      "severity": "blocker",
+      "remedy": "Install node (mise use -g node@lts, or see the pin in .nvmrc)",
+      "volatility": "stable",
+      "notes": "The root of this layer's taint chain, and gated on package.json so a Rust or Python repo is N/A rather than being told it is missing a runtime it never wanted. Every check below asks node a question, so without this gate they would report four findings where there is one."
+    },
+    {
+      "id": "runtime.node.pin_declared",
+      "title": "Repo declares a node version",
+      "applies_if": "test -f package.json",
+      "probe": [
+        "if [ -f .nvmrc ]; then echo .nvmrc",
+        "elif [ -f .node-version ]; then echo .node-version",
+        "elif [ -f .tool-versions ] && grep -q '^nodejs ' .tool-versions; then echo .tool-versions",
+        "elif grep -q '\"node\"' package.json 2>/dev/null; then echo engines",
+        "else echo none; fi"
+      ],
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^(\\.nvmrc|\\.node-version|\\.tool-versions|engines)$" },
+      "severity": "warning",
+      "decisive": false,
+      "remedy": "Add a pin: echo 20 > .nvmrc, or an engines.node range in package.json",
+      "tainted_by": ["runtime.node.present"],
+      "volatility": "stable",
+      "notes": "Reports WHICH source declares the pin, not just that one exists, because the answer determines what runtime.node.version compares against and a reader debugging a version mismatch needs to know which file won. Only .tool-versions entries naming nodejs count: a file pinning opam alone declares nothing about node. Warning rather than blocker -- an unpinned repo is sloppy, not broken, and calling it a blocker would cry wolf on the majority of real repos."
+    },
+    {
+      "id": "runtime.node.version",
+      "title": "Node version matches the repo pin",
+      "applies_if": "test -f package.json && command -v node >/dev/null 2>&1 && { test -f .nvmrc || test -f .node-version || grep -q '^nodejs ' .tool-versions 2>/dev/null || grep -q '\"node\"' package.json 2>/dev/null; }",
+      "probe": "node -v 2>/dev/null",
+      "declared": [
+        "if [ -f .nvmrc ]; then",
+        "  sed -e 's/^v//' -e 's/[[:space:]]*$//' .nvmrc | grep . | head -1",
+        "elif [ -f .node-version ]; then",
+        "  sed -e 's/^v//' -e 's/[[:space:]]*$//' .node-version | grep . | head -1",
+        "elif [ -f .tool-versions ] && grep -q '^nodejs ' .tool-versions; then",
+        "  sed -n 's/^nodejs[[:space:]]\\{1,\\}\\([^[:space:]]*\\).*/\\1/p' .tool-versions | head -1",
+        "else",
+        "  tr -d '\\n' < package.json | sed -n 's/.*\"engines\"[[:space:]]*:[[:space:]]*{[^}]*\"node\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' | head -1",
+        "fi"
+      ],
+      "expect": { "type": "semver_satisfies", "actual": "$probe", "range": "$declared" },
+      "severity": "blocker",
+      "remedy": "mise install   # or: nvm use $declared",
+      "tainted_by": ["runtime.node.present"],
+      "volatility": "session",
+      "notes": "The central check of this layer. The declared chain is ORDERED and repo-local pins win: .nvmrc, then .node-version, then a nodejs line in .tool-versions, then engines.node. That order is load-bearing rather than arbitrary. A stale ~/.tool-versions in the home directory is common -- this machine has one naming nodejs 12.22.4 while node is v24 -- and a chain that consulted it first would report a NO-GO in every repo on the box, which is precisely the false positive that gets a tool ignored. Because probes run with the repo as the working directory, an unqualified .tool-versions only matches a repo-local one. NOT tainted by shell.path.node_shadowing, though the first draft was, and the reason is the same over-tainting mistake the Tier-1 session already fixed once. The argument for the taint sounds right -- with several node binaries on PATH, `node -v` reports whichever this shell resolved, and the build might resolve a different one. It fails README.md's actual test: does the prerequisite's failure make this MEASUREMENT wrong? On the repo this was checked against, .nvmrc pins 20.15.1 and the three installs on PATH are v25.8.0, v12.22.9, and v24.13.1. None satisfies the pin, so the answer is 'violated' no matter which one answers, and the taint converted the single most valuable finding in the repo into an UNKNOWN buried under an unrelated blocker. Shadowing is reported on its own by shell.path.node_shadowing; it does not need to eat this check too. NOT tainted by shell.path.duplicates either: a duplicated PATH entry pointing at one binary changes nothing about which version answers. An absent pin resolves UNKNOWN(probe_error) via the empty-range rule in MANIFEST_SCHEMA.md section 4, never NO-GO, because 'nothing declared' and 'wrong version' are different facts. The engines extraction strips NEWLINES ONLY. An earlier draft used `tr -d ' \\n'`, which also deleted the spaces inside a range: '>=16 <21' became '>=16<21' (an unparseable version, so UNKNOWN and coverage silently lost) and '^18 || ^20' became '^18||^20', which still parses and so would have rendered a corrupted range as a confident NO-GO. Caught by extracting against a real package.json and reading the string, not by any test."
+    },
+    {
+      "id": "runtime.node.fresh_shell_version",
+      "title": "Node resolves the same version in a clean environment",
+      "applies_if": "test -f package.json && command -v node >/dev/null 2>&1",
+      "probe": "node -v 2>/dev/null || echo absent",
+      "isolate": true,
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^v[0-9]" },
+      "severity": "warning",
+      "remedy": "Configure the version manager in a non-interactive-safe rc (.zshenv / .profile), or install node system-wide",
+      "tainted_by": ["runtime.node.present"],
+      "volatility": "session",
+      "notes": "shell.path.node_fresh_shell asks whether node EXISTS without your dotfiles; this asks what VERSION answers there. They differ: a version manager shimmed only in .zshrc can leave a system node on PATH, so node is found in both environments while reporting different versions, and CI silently builds against a runtime the developer has never run. The gate is deliberately unisolated per MANIFEST_SCHEMA.md -- isolating it would make the check self-cancelling, which is the bug that produced the isolate rule. Expects any v-prefixed version rather than comparing to the pin, because comparing two dynamic values needs arithmetic the schema deliberately lacks (section 11); 'absent' falls out of the pattern and reports honestly."
+    },
+    {
+      "id": "runtime.version_manager.conflict",
+      "title": "Only one node version manager is active",
+      "applies_if": "test -f package.json",
+      "probe": [
+        "n=0",
+        "for m in mise asdf fnm volta nodenv n; do",
+        "  command -v \"$m\" >/dev/null 2>&1 && n=$((n + 1))",
+        "done",
+        "if [ -s \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" ] || [ -d \"${NVM_DIR:-$HOME/.nvm}/versions\" ] || [ -s /opt/homebrew/opt/nvm/nvm.sh ] || [ -s /usr/local/opt/nvm/nvm.sh ]; then n=$((n + 1)); fi",
+        "echo $n"
+      ],
+      "expect": { "type": "numeric_lt", "actual": "$probe", "value": 2 },
+      "severity": "warning",
+      "remedy": "Uninstall or deactivate all but one version manager; two competing shims are why node changes version between shells",
+      "volatility": "stable",
+      "notes": "Two version managers installed at once is the single most confusing state in this layer: each installs a shim, PATH order decides which wins, and the answer changes between a login shell, a script, and CI. It is also why the same repo builds on one terminal tab and not another. nvm is detected by its script rather than by command -v, because nvm is a shell FUNCTION -- it is sourced into the rc, not a binary on PATH, so `command -v nvm` finds nothing in a non-interactive shell while nvm is very much installed and active. Four nvm locations are checked because one is not enough: on the machine this was written against, nvm came from Homebrew, so nvm.sh sits in /opt/homebrew/opt/nvm/ while NVM_DIR (~/.nvm) holds only the installed versions. Checking $NVM_DIR/nvm.sh alone undercounted -- it reported 2 where the truth was 3. The check still fired, since 2 already exceeds the threshold, but a wrong number in a report is a defect regardless of whether the verdict survives it. The versions/ directory is checked too, since that is what exists when nvm is installed but its script has moved. Counting rather than naming them keeps machine-identifying paths out of the evidence."
+    },
+    {
+      "id": "runtime.build_chain.cc",
+      "title": "A C compiler is available for native modules",
+      "applies_if": "test -d node_modules && { test -f package-lock.json || test -f pnpm-lock.yaml || test -f yarn.lock; }",
+      "probe": "{ command -v cc || command -v gcc || command -v clang; } >/dev/null 2>&1 && echo present || echo absent",
+      "expect": { "type": "equals", "actual": "$probe", "value": "present" },
+      "severity": "warning",
+      "decisive": false,
+      "remedy": "macOS: xcode-select --install    Debian: apt install build-essential",
+      "volatility": "stable",
+      "notes": "Packages with native addons run node-gyp at install time, which needs a compiler, and the failure arrives as several hundred lines of gyp output that names everything except the actual cause. Warning and non-decisive because most installs never compile anything: a missing compiler is a latent problem, not a present one, and promoting it to blocker would fail repos that would install perfectly. Gated on an existing node_modules with a lockfile so it is asked only where a native rebuild is plausible."
+    }
+  ]
+}

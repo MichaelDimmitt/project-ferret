@@ -1,0 +1,136 @@
+{
+  "layer": 5,
+  "checks": [
+    {
+      "id": "pm.lockfile.count",
+      "title": "Repo has exactly one lockfile",
+      "applies_if": "test -f package.json",
+      "probe": [
+        "n=0",
+        "for f in package-lock.json pnpm-lock.yaml yarn.lock bun.lockb bun.lock npm-shrinkwrap.json; do",
+        "  if [ -f \"$f\" ]; then n=$((n + 1)); fi",
+        "done",
+        "echo $n"
+      ],
+      "expect": { "type": "equals", "actual": "$probe", "value": "1" },
+      "severity": "warning",
+      "remedy": "Delete the lockfiles that do not belong to your package manager; keep the one matching packageManager",
+      "volatility": "stable",
+      "notes": "Two lockfiles means two package managers have run here, and the dependency tree that results depends on which one CI happens to invoke -- the classic cause of 'it resolved a different version on the build box'. Zero is also a finding: an unlocked install resolves fresh every time and is not reproducible. Both fall out of equals-1, and the remedy names the disambiguator. Counted rather than named because the count is what the reader acts on."
+    },
+    {
+      "id": "pm.declared",
+      "title": "Repo declares a package manager",
+      "applies_if": "test -f package.json",
+      "probe": [
+        "pm=$(tr -d '\\n' < package.json | sed -n 's/.*\"packageManager\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' | head -1)",
+        "if [ -n \"$pm\" ]; then echo \"$pm\"",
+        "elif [ -f pnpm-lock.yaml ]; then echo 'pnpm (inferred from lockfile)'",
+        "elif [ -f yarn.lock ]; then echo 'yarn (inferred from lockfile)'",
+        "elif [ -f package-lock.json ]; then echo 'npm (inferred from lockfile)'",
+        "else echo none; fi"
+      ],
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^(npm|pnpm|yarn|bun)@" },
+      "severity": "warning",
+      "decisive": false,
+      "remedy": "Add \"packageManager\": \"pnpm@9.3.0\" (or your PM and version) to package.json, then corepack enable",
+      "volatility": "stable",
+      "notes": "Reports the declared string, or what the lockfile implies when nothing is declared. Only an explicit packageManager field passes: an inferred value is a real answer for a human reading the report but not a pin, and corepack cannot enforce it. Non-decisive because the majority of working repos still have no packageManager field, and blocking the verdict on that would cry wolf. The inferred branches exist so the finding reads 'pnpm, inferred' rather than an unhelpful bare 'none'."
+    },
+    {
+      "id": "pm.version_matches_pin",
+      "title": "Package manager version matches packageManager",
+      "applies_if": "test -f package.json && grep -q '\"packageManager\"' package.json",
+      "probe": [
+        "pm=$(tr -d '\\n' < package.json | sed -n 's/.*\"packageManager\"[[:space:]]*:[[:space:]]*\"\\([^\"@]*\\)@.*/\\1/p' | head -1)",
+        "[ -n \"$pm\" ] || exit 1",
+        "command -v \"$pm\" >/dev/null 2>&1 || exit 1",
+        "\"$pm\" --version 2>/dev/null"
+      ],
+      "declared": "tr -d '\\n' < package.json | sed -n 's/.*\"packageManager\"[[:space:]]*:[[:space:]]*\"[^\"@]*@\\([^\"+]*\\).*/\\1/p' | head -1",
+      "expect": { "type": "semver_satisfies", "actual": "$probe", "range": "$declared" },
+      "severity": "warning",
+      "remedy": "corepack enable && corepack use $declared",
+      "tainted_by": ["pm.lockfile.count"],
+      "volatility": "session",
+      "notes": "packageManager pins an EXACT version, so this is the check most likely to fire on a real repo: both pnpm repos on the machine this was written against declare pnpm@9.3.0 while pnpm 10.12.1 is installed, and pretty-ts-errors declares npm@10.0.0 against npm 11.8.0. All three are true findings -- a major-version gap in a package manager changes lockfile format and resolution. Warning rather than blocker because a newer PM usually still installs correctly; it is the reproducibility that suffers. The probe strips any +sha224 integrity suffix corepack allows, via the [^\"+] class in declared. Tainted by lockfile.count because with two lockfiles present, which PM 'should' be running is genuinely ambiguous and comparing one of them to the pin measures the wrong thing."
+    },
+    {
+      "id": "pm.node_modules.present",
+      "title": "Dependencies are installed",
+      "applies_if": "test -f package.json && { test -f package-lock.json || test -f pnpm-lock.yaml || test -f yarn.lock; }",
+      "probe": "test -d node_modules && echo present || echo absent",
+      "expect": { "type": "equals", "actual": "$probe", "value": "present" },
+      "severity": "blocker",
+      "remedy": "npm ci   # or the equivalent for your package manager: pnpm install --frozen-lockfile",
+      "tainted_by": ["runtime.node.present"],
+      "volatility": "volatile",
+      "notes": "Gated on a lockfile existing, so a repo that genuinely has no dependencies is N/A rather than being told to install them. Blocker because nothing builds without it and the remedy is one command. Deliberately does NOT try to verify that node_modules AGREES with the lockfile: doing that honestly means resolving the full tree, which is slow, needs network, and is what the package manager itself does on install. Claiming agreement from a directory listing would be the kind of half-verified assertion this tool exists not to make -- see pm.node_modules.staleness for the part that can be answered."
+    },
+    {
+      "id": "pm.node_modules.staleness",
+      "title": "node_modules is newer than the lockfile",
+      "applies_if": "test -d node_modules && { test -f package-lock.json || test -f pnpm-lock.yaml || test -f yarn.lock; }",
+      "probe": [
+        "for f in package-lock.json pnpm-lock.yaml yarn.lock; do",
+        "  [ -f \"$f\" ] || continue",
+        "  if [ \"$f\" -nt node_modules ]; then echo stale; exit 0; fi",
+        "done",
+        "echo current"
+      ],
+      "expect": { "type": "equals", "actual": "$probe", "value": "current" },
+      "severity": "warning",
+      "remedy": "npm ci   # or: pnpm install --frozen-lockfile",
+      "tainted_by": ["pm.node_modules.present"],
+      "volatility": "volatile",
+      "notes": "A lockfile modified after the last install -- the normal result of pulling a branch that changed dependencies -- means the installed tree no longer matches what is committed. This is a mtime comparison, which is the honest limit of what can be answered without resolving the tree: it detects the common case (git updated the lockfile) and cannot detect a hand-edited node_modules. `-nt` is POSIX test and works in /bin/sh. Warning, not blocker: the tree still builds, it just may not build what the lockfile says."
+    },
+    {
+      "id": "pm.npmrc.present",
+      "title": "Repo-local .npmrc exists",
+      "applies_if": "test -f package.json",
+      "probe": "test -f .npmrc && echo present || echo absent",
+      "expect": { "type": "equals", "actual": "$probe", "value": "absent" },
+      "severity": "info",
+      "decisive": false,
+      "volatility": "stable",
+      "notes": "Presence, by stat, without opening the file. Info and non-decisive: a repo-local .npmrc is completely legitimate -- it is how private registries and scopes are configured -- and this exists to tell the reader that the checks below have something to describe, and that install behaviour here is influenced by a file they may not have read. Expecting 'absent' means the glance surfaces it rather than swallowing it into a passed count; it is not a claim the file is wrong."
+    },
+    {
+      "id": "pm.npmrc.auth_present",
+      "title": ".npmrc carries an auth token",
+      "applies_if": "test -f .npmrc",
+      "probe": "grep -c '_authToken' .npmrc 2>/dev/null || true",
+      "expect": { "type": "equals", "actual": "$probe", "value": "0" },
+      "severity": "info",
+      "decisive": false,
+      "redact": "secret",
+      "volatility": "expiring",
+      "notes": "The sharpest secret-handling case in the project, and the reason AGENTS.md states the rule as 'never open the file' rather than 'be careful with the file'. `grep -c` emits a COUNT; `grep '_authToken=.*'` would emit the token itself. One character separates a check from a leak, and runner.go's readsSecret refuses the leaking form outright while ferret/secrets_test.go pins both halves. A committed .npmrc holding a credential is worth surfacing -- it is a real and common mistake -- but Ferret reports only that a line matching the key EXISTS. Whether that token is valid, correctly scoped, or points at the right host is UNKNOWN(unverifiable) permanently, per MANIFEST_SCHEMA.md section 11. Info because a token in a user-level .npmrc is normal; the finding is informational context, not an accusation."
+    },
+    {
+      "id": "pm.npmrc.registry",
+      "title": ".npmrc registry is the public default",
+      "applies_if": "test -f .npmrc",
+      "probe": "grep -o '^registry=.*' .npmrc 2>/dev/null | head -1 || true",
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^(registry=https://registry\\.npmjs\\.org/?)?$" },
+      "severity": "info",
+      "decisive": false,
+      "redact": "secret",
+      "volatility": "stable",
+      "notes": "A NAMED non-secret line, matched at the start of the line so the pattern can only ever capture the registry setting. This is the one form of reading permitted by AGENTS.md's what-this-permits list, and it is safe because `registry=` lines hold a URL rather than a credential -- an auth line is spelled //host/:_authToken= and cannot match ^registry=. An empty result (no registry line, so the public default applies) passes via the optional group. A private registry is not a defect, which is why this is info: it is reported so that a reader debugging an install failure knows packages are not coming from where they assume."
+    },
+    {
+      "id": "pm.npmrc.ignore_scripts",
+      "title": "ignore-scripts setting in .npmrc",
+      "applies_if": "test -f .npmrc",
+      "probe": "grep -o '^ignore-scripts=.*' .npmrc 2>/dev/null | head -1 || true",
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^(ignore-scripts=true)?$" },
+      "severity": "info",
+      "decisive": false,
+      "redact": "secret",
+      "volatility": "stable",
+      "notes": "Another named non-secret setting. ignore-scripts=true blocks lifecycle scripts, which is a hardening measure -- and also a cause of packages that appear installed but were never built, since native modules do their compilation in a postinstall. Reported either way: the reader needs to know which regime they are in when an install 'succeeds' and the module is missing its binary. Info because both values are defensible positions rather than errors."
+    }
+  ]
+}

@@ -334,22 +334,73 @@ direct cause of "works in my terminal, fails in CI".
 Tier-1 area independently in shell. Both agree on every overlapping value.
 That is the payoff for the duplication M6 accepted deliberately.
 
-**Layer 4 — runtime vs pin:**
-- [ ] `.nvmrc` / `.node-version` / `engines` / `packageManager` / `.tool-versions` vs actual
-- [ ] Version manager conflicts (two installed simultaneously)
-- [ ] Native build chain presence
+**Layer 4 — runtime vs pin:** *(landed — 6 checks in `manifest/04-runtime.json`)*
+- [x] `.nvmrc` / `.node-version` / `engines` / `packageManager` / `.tool-versions` vs actual
+- [x] Version manager conflicts (two installed simultaneously)
+- [x] Native build chain presence
 
-**Layer 5 — package manager:**
-- [ ] Lockfile count (>1 is a warning), lockfile vs PM version
-- [ ] `.npmrc` registry, scopes, `ignore-scripts` — **without opening the
+**Layer 5 — package manager:** *(landed — 9 checks in `manifest/05-packagemanager.json`)*
+- [x] Lockfile count (>1 is a warning), lockfile vs PM version
+- [x] `.npmrc` registry, scopes, `ignore-scripts` — **without opening the
       file's auth lines**. `grep -c '_authToken'` for presence, `grep -o
       '^registry='` for the non-secret setting. Never `cat`, never a match that
       includes a value: one character (`grep -c` vs `grep`) separates a check
       from a leak
-- [ ] Registry reachability with timeout
-- [ ] `node_modules` present vs lockfile agreement
+- [x] Registry reachability with timeout — **already implemented** as
+      `network.registry.reachable` in `02-network.json`, where it landed with
+      Tier 1. Not duplicated here: a second copy reports one outage as two
+      findings, and the layer-2 version is better tainted. See `manifest/README.md`
+- [x] `node_modules` present vs lockfile agreement — present/absent and mtime
+      staleness only. Real agreement means resolving the tree, which is what
+      the package manager does on install; claiming it from a directory
+      listing would be the half-verified assertion this tool exists not to make
 
-**Exit:** run against three real repos of different shapes. Every reported NO-GO is real. **Every false positive is a bug** — a status check that cries wolf gets ignored, which is total failure, not partial.
+**Exit: met.** Run against three real repos of different shapes —
+`table` (pnpm, `.nvmrc` pinning 20.15.1, repo-local `.npmrc`),
+`pretty-ts-errors` (npm monorepo, `engines` + `packageManager`), and
+`repomap` (Rust, no `package.json`). Every value was checked by hand against
+independently measured ground truth before being believed.
+
+- `table` → **NO-GO**, 2 blockers. Pin violated (v24.13.1 against 20.15.1) and
+  `node_modules` absent. Both true.
+- `pretty-ts-errors` → **GO**. `>=20` satisfied by v24; the npm 11.8.0 against
+  a `npm@10.0.0` pin is a true warning, not a blocker.
+- `repomap` → **GO**, 17 N/A. Every layer 4/5 check declines to fire on a repo
+  with no `package.json`. **This is the false-positive case that mattered
+  most**, and it is clean: a Rust repo is asked nothing about node.
+
+**Four defects found, three of them by reading output rather than by testing.**
+
+1. **`tr -d ' \n'` corrupted every spaced semver range.** `>=16 <21` became
+   `>=16<21` (unparseable → UNKNOWN, coverage silently lost) and `^18 || ^20`
+   became `^18||^20`, which still parses — so a corrupted range would have
+   rendered as a confident NO-GO. Now strips newlines only.
+2. **`redact: "secret"` shaped measurements, not just secrets.** `applyRedaction`
+   called `shapeOf` unconditionally, making `shapeLines` unreachable from the
+   only path that reaches it in production. `grep -c '_authToken'` returned
+   `1`, which was shaped into `<set, 1 chars, hash …>`, so `equals "0"` could
+   never evaluate — the check could neither pass nor honestly fail. **This is
+   exactly the "unimplementable at redact: secret" failure M5's notes
+   predicted for M7**, arriving where it was predicted. Fixed by `shapeSecret`;
+   pinned by `TestSecretRedactionKeepsMeasurements`, which asserts both
+   directions.
+3. **Over-tainting buried the best finding, again.** `runtime.node.version` was
+   `tainted_by: shell.path.node_shadowing`, which sounds right and fails
+   README.md's test. The three installs on PATH are v25.8.0, v12.22.9, and
+   v24.13.1; none satisfies a 20.15.1 pin, so shadowing cannot change the
+   answer. The taint turned the most valuable finding in the repo into an
+   UNKNOWN under an unrelated blocker. **Second occurrence of this mistake** —
+   the Tier-1 session fixed the same class.
+4. **Remedies never interpolated.** MANIFEST_SCHEMA.md §5 says tokens expand in
+   `expect` values *and* `remedy`; only `expect` was wired. Every remedy using
+   a token printed it literally — the schema's own `nvm use $declared` example
+   handed the user a command naming an unset shell variable. A wrong remedy is
+   worse than none. Fixed in `verdict.go`, pinned by
+   `TestRemedyInterpolatesTokens`. **A verdict-engine bug, not a manifest one**,
+   found only because a real glance was read.
+
+Defect 4 is the argument for this milestone's intervention point in one line:
+the checks were correct, the suite was green, and the advice was broken.
 
 ---
 
