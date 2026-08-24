@@ -1,0 +1,9 @@
+# Ferret's own state — never committed (see docs/DOCS_MODEL.md)
+.ferret/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
