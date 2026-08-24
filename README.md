@@ -85,7 +85,9 @@ Without this you get the worst possible input to a decision: one red, mostly gre
 
 - **Install anything off its own initiative.** The proposed list is approved or edited by you first. Every installed thing is tagged `ferret-installed` with method and timestamp, so Ferret's own footprint never gets reported back as a finding about your machine. `--footprint` lists it; `--revert` undoes it.
 - **Mutate before a baseline exists.** Observation is strictly read-only. The baseline is written before anything changes, so you can always answer *"was this broken before I got here?"*
-- **Print secrets.** Environment variables, `.npmrc` auth tokens, and remotes with embedded credentials all get captured. Redaction is allowlist-based, not blocklist-based, and output paths are gitignored by default.
+- **Read secrets — at all.** Not "capture them and redact them." Ferret determines that a token *exists* and what its file's permissions are; it never learns the value. A probe that would put one on stdout is refused before it runs, and the check resolves UNKNOWN(unverifiable). Redaction still exists as a backstop for everything else, allowlist-based and applied at capture time, and output paths are gitignored by default.
+
+  This costs real coverage — *"is this token valid"* and *"is the auth line pointing at the right host"* cannot be answered without reading, so they never get answered. That trade is deliberate: a value that was never read cannot leak from a log, a crash dump, a scrollback buffer, or a debug print someone adds at 2am. Redaction can only promise *we didn't keep it*.
 - **Guess.** If it can't determine something, it says UNKNOWN and why.
 - **Give up when it can't fix things.** No sudo, no egress, immutable filesystem — each is itself a finding. The machines where remediation fails are the machines that need the report most.
 

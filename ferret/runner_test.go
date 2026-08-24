@@ -388,6 +388,126 @@ func TestToolAbsentHeuristic(t *testing.T) {
 	}
 }
 
+// AGENTS.md § "Never read a secret". The guarantee is that the value is never
+// read -- not that it is redacted afterwards -- so the refusal must happen
+// before execution.
+func TestSecretReadingProbesAreRefused(t *testing.T) {
+	forbidden := []string{
+		"printenv GH_TOKEN",
+		"printenv GITHUB_TOKEN || printenv GH_TOKEN",
+		"echo $NPM_TOKEN",
+		"echo \"$AWS_SECRET_ACCESS_KEY\"",
+		"cat ~/.npmrc",
+		"cat .env",
+		"head -1 ~/.netrc",
+		"cat ~/.ssh/id_rsa",
+		"cat /etc/ssl/private/server.key",
+		"grep '_authToken=' .npmrc",
+		"awk -F= '{print $2}' .npmrc",
+	}
+	for _, script := range forbidden {
+		if got := readsSecret(script); got == "" {
+			t.Errorf("readsSecret(%q) = allowed; this reads a secret value", script)
+		}
+	}
+
+	allowed := []string{
+		`if [ -n "${GH_TOKEN:-}" ]; then echo set; fi`,
+		`test -n "$GH_TOKEN" && echo set`,
+		"test -f ~/.npmrc",
+		"stat -f '%Sp' ~/.npmrc",
+		"grep -c '_authToken' ~/.npmrc",
+		"grep -o '^registry=.*' .npmrc",
+		"printenv PATH",
+		"printenv HOME",
+		"echo $PATH",
+		"git remote -v",
+	}
+	for _, script := range allowed {
+		if got := readsSecret(script); got != "" {
+			t.Errorf("readsSecret(%q) = refused on %q; this does not read a value",
+				script, got)
+		}
+	}
+}
+
+// The refusal must be structural: no execution, and no override to waive it.
+func TestSecretReadRefusalHappensBeforeExecution(t *testing.T) {
+	ev := runManifest(t, `{
+	  "layer": 0,
+	  "checks": [
+	    {"id": "s.reads", "title": "Would read a token",
+	     "probe": "printenv GH_TOKEN",
+	     "expect": {"type": "non_empty", "actual": "$probe"},
+	     "severity": "warning", "remedy": "n/a", "redact": "secret"}
+	  ]
+	}`)
+
+	rec := recordFor(t, ev, "s.reads")
+	if rec.Error == nil {
+		t.Fatal("a secret-reading probe must be refused")
+	}
+	if rec.Error.Kind != errUnverifiable {
+		t.Errorf("kind = %q, want %q", rec.Error.Kind, errUnverifiable)
+	}
+	if rec.Probe.DurationMs > 100 {
+		t.Error("the probe executed; the refusal must come first")
+	}
+	if rec.Probe.Exit != -1 {
+		t.Errorf("exit = %d, want -1: the probe never ran", rec.Probe.Exit)
+	}
+	if rec.Probe.Stdout != "" {
+		t.Errorf("stdout is non-empty (%q); nothing should have been captured",
+			rec.Probe.Stdout)
+	}
+}
+
+// Unlike the mutation denylist, this has no escape hatch. mutating: false must
+// not waive it -- the two rules are independent, and a probe that reads a
+// secret is forbidden however read-only it is.
+func TestMutatingOverrideDoesNotWaiveSecretRule(t *testing.T) {
+	ev := runManifest(t, `{
+	  "layer": 0,
+	  "checks": [
+	    {"id": "s.override", "title": "Claims read-only, still reads a secret",
+	     "probe": "cat ~/.npmrc",
+	     "expect": {"type": "non_empty", "actual": "$probe"},
+	     "severity": "info",
+	     "mutating": false,
+	     "mutating_why": "cat only reads"}
+	  ]
+	}`)
+
+	rec := recordFor(t, ev, "s.override")
+	if rec.Error == nil || rec.Error.Kind != errUnverifiable {
+		t.Fatalf("mutating: false waived the secret rule; got %+v", rec.Error)
+	}
+}
+
+// The committed manifest fixtures must model the rule, since they double as
+// the worked reference for anyone adding checks.
+func TestFixtureProbesDoNotReadSecrets(t *testing.T) {
+	m, _, err := LoadManifest(filepath.Join(fixtures, "manifest-valid"))
+	if err != nil {
+		t.Fatalf("load: %v", problemsOf(err))
+	}
+	for i := range m.Checks {
+		c := &m.Checks[i]
+		for _, cmd := range []struct {
+			name string
+			s    string
+		}{
+			{"probe", c.Probe.Script},
+			{"declared", c.Declared.Script},
+			{"applies_if", c.AppliesIf.Script},
+		} {
+			if got := readsSecret(cmd.s); got != "" {
+				t.Errorf("%s: %s reads a secret via %q", c.ID, cmd.name, got)
+			}
+		}
+	}
+}
+
 func TestDenylistAllowsReadOnlyRedirects(t *testing.T) {
 	cases := []struct {
 		script string

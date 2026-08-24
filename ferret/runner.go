@@ -82,6 +82,12 @@ const (
 	errToolAbsent = "tool_absent"
 	errPermission = "permission"
 	errProbeError = "probe_error"
+
+	// errUnverifiable is emitted for one situation only: a probe was refused
+	// because it would have read a secret value. That is unverifiable BY
+	// DESIGN rather than by circumstance -- the answer is not unavailable, it
+	// is one Ferret declines to obtain. See AGENTS.md.
+	errUnverifiable = "unverifiable"
 )
 
 // denylistTokens is the mutation denylist, per MANIFEST_SCHEMA.md §6.
@@ -109,6 +115,57 @@ var denylistRe = func() *regexp.Regexp {
 // redirectRe catches > and >> without matching 2>/dev/null, >&2, or the
 // comparison operators in test expressions. Discarding output is not mutation.
 var redirectRe = regexp.MustCompile(`>>?\s*(?:&\s*\d|/dev/(?:null|stderr|stdout)\b)?`)
+
+// secretReadRe catches the common ways a probe would pull a secret VALUE into
+// stdout. AGENTS.md § "Never read a secret" is the rule; this is its
+// mechanical backstop, and like the mutation denylist it is not a sandbox.
+//
+// It matches reading, not mentioning. `printenv GH_TOKEN` is refused;
+// `[ -n "${GH_TOKEN:-}" ]` is not, because the value never reaches stdout.
+var secretReadRe = regexp.MustCompile(
+	// printenv/echo/cat of a credential-named variable
+	`(?i)\b(printenv|echo|print)\s+"?\$?\{?[A-Z_]*(TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|CREDENTIAL|PRIVATE_KEY)[A-Z_]*\}?` +
+		// or opening a file that is known to carry credentials
+		`|\b(cat|head|tail|less|more|awk|cut)\b[^|;&]*\.(npmrc|netrc|pgpass|env)\b` +
+		`|\b(cat|head|tail|less|more)\b[^|;&]*(id_rsa|id_ed25519|\.pem|\.key|credentials)\b`)
+
+// secretAssignRe matches a credential key followed by '=', which is the shape
+// of a line whose VALUE would be emitted. `_authToken=` in a grep pattern
+// means the match includes the token; `_authToken` alone does not.
+//
+// Go's regexp is RE2, which has no negative lookahead by design, so "a grep
+// that is not counting" cannot be one pattern. readsSecret composes it from
+// two checks instead, which reads better than a lookahead would have.
+var secretAssignRe = regexp.MustCompile(
+	`(?i)(_authToken|_password|passwd|apikey|api_key|secret|token)\s*=`)
+
+// countingGrepRe recognises the safe form: grep -c, which yields a number.
+var countingGrepRe = regexp.MustCompile(`\bgrep\b[^|;&]*\s-[a-zA-Z]*c`)
+
+// fieldExtractRe matches tools that print a selected field, which over a
+// credential assignment means printing the value.
+var fieldExtractRe = regexp.MustCompile(`\b(awk|cut|sed)\b`)
+
+// readsSecret returns a description of the violation, or "" if the command is
+// allowed.
+func readsSecret(script string) string {
+	if m := secretReadRe.FindString(script); m != "" {
+		return strings.TrimSpace(m)
+	}
+	// A grep whose pattern includes a credential KEY followed by '=' would
+	// print the value. The counting form is exempt: it yields a number.
+	if strings.Contains(script, "grep") && !countingGrepRe.MatchString(script) {
+		if m := secretAssignRe.FindString(script); m != "" {
+			return strings.TrimSpace(m)
+		}
+	}
+
+	// Field extraction from a credential file prints the value by definition.
+	if secretAssignRe.MatchString(script) && fieldExtractRe.MatchString(script) {
+		return "field extraction over a credential assignment"
+	}
+	return ""
+}
 
 // deniedBy returns the matched token, or "" if the command is allowed.
 func deniedBy(script string) string {
@@ -223,6 +280,23 @@ func (r *Runner) runCheck(ctx context.Context, c *Check, now func() time.Time) R
 // itself. It does not judge the command's exit code -- a non-zero exit is not
 // an error here, it is data, and `expect` decides what it means.
 func (r *Runner) exec(ctx context.Context, c *Check, script string, timeout float64, phase string) (*RunResult, *RunError) {
+	// Never read a secret. AGENTS.md makes this binding on probes, scripts,
+	// and agents; this is the mechanical backstop.
+	//
+	// NOTE THE ABSENCE OF AN OVERRIDE. The mutation denylist has one, because
+	// `git config --get` is genuinely read-only despite matching. This has
+	// none: there is no probe that legitimately needs a secret's value, so an
+	// escape hatch would only ever be used to do the forbidden thing. A check
+	// that cannot be performed without reading is UNKNOWN(unverifiable), which
+	// is a supported result, not a problem to route around.
+	if m := readsSecret(script); m != "" {
+		return &RunResult{Exit: -1}, &RunError{
+			Kind: errUnverifiable,
+			Detail: fmt.Sprintf("%s refused: %q would read a secret value. "+
+				"Test for presence instead (see AGENTS.md: Never read a secret)", phase, m),
+		}
+	}
+
 	// §6: the denylist runs immediately before execution, not at validation
 	// time, so a denied check still appears in the evidence with its reason
 	// rather than the sweep refusing to start.

@@ -242,12 +242,23 @@ the runner**, before anything is written.
 | `false` (default) | Standard capture. Global redaction still applies. |
 | `true` | Same as `"identity"`. |
 | `"identity"` | Strip user, home, tmpdir, repo path. Level 1 in `scripts/lib/redact.sh`. |
-| `"secret"` | Allowlist mode: record presence and shape only, never the value. |
+| `"secret"` | The probe is **asserted not to read a value**. Shaping is a backstop, not the mechanism. |
 
-`"secret"` is not a stronger substitution pass — it is a different rule.
-Nothing captured under it is retained verbatim. Output is recorded as
-`<set, 40 chars, ghp_…>`, and credential-shaped values get a stable salted hash
-so "same token as before" is answerable without exposing it.
+`"secret"` is a declaration by the check's author: *this probe touches
+something secret-adjacent, and it does not read the value.* A probe under this
+level must already be written so nothing sensitive reaches stdout — testing
+whether a variable is set rather than printing it, counting a key rather than
+matching its value.
+
+The shaping in the runner (`<set, 40 chars, ghp_…>`) still runs, but it is a
+**backstop against an authoring mistake, not the guarantee**. The guarantee is
+that the value was never read. See AGENTS.md § *Never read a secret*, which
+binds probes, scripts, and agents alike.
+
+The distinction matters because redaction can only promise *we did not keep
+it* — the value still transited the process, the pipe, and possibly a debug
+print. Not reading promises **we never saw it**, which is the version that
+survives someone adding a `fmt.Println` while chasing a bug.
 
 The levels must agree with `scripts/lib/redact.sh`, which is the shell
 precedent and already tested. `false`/`"identity"` map to its levels 0 and 1.
@@ -502,9 +513,14 @@ Rules:
   run.
 - `error` is `null` or `{ "kind": "...", "detail": "..." }`, where `kind` is
   one of the UNKNOWN reasons the runner can determine on its own:
-  `timeout`, `tool_absent`, `permission`, `probe_error`. The runner never emits
-  `tainted` (M3's judgment), `unverifiable` (a property of the check, not the
-  run), or `expired` (M10's).
+  `timeout`, `tool_absent`, `permission`, `probe_error`, and `unverifiable`.
+  The runner never emits `tainted` (M3's judgment) or `expired` (M10's).
+
+  `unverifiable` has exactly one runner-side cause: a probe was refused for
+  attempting to read a secret value (AGENTS.md § *Never read a secret*). That
+  is unverifiable *by design* — the answer is not unavailable, it is one Ferret
+  declines to obtain — which is precisely what the reason means in
+  ARCHITECTURE.md §5.
 - Stdout and stderr are truncated at 64 KiB with `truncated: true`; the
   untruncated text goes to `.ferret/raw/<id>.{out,err}` for debugging Ferret
   itself.
@@ -624,15 +640,15 @@ number:
 network" from "unparseable date". **This is a real limitation of the schema,
 and §11 is where it is on the record.**
 
-### Presence, with a secret
+### Presence, without reading the secret
 
 ```json
 {
   "id": "forge.token.present",
   "title": "GH_TOKEN is set",
   "applies_if": "git remote -v 2>/dev/null | grep -q github.com",
-  "probe": "printenv GH_TOKEN || printenv GITHUB_TOKEN",
-  "expect": { "type": "non_empty", "actual": "$probe" },
+  "probe": "if [ -n \"${GH_TOKEN:-}\" ] || [ -n \"${GITHUB_TOKEN:-}\" ]; then echo set; fi",
+  "expect": { "type": "equals", "actual": "$probe", "value": "set" },
   "severity": "warning",
   "remedy": "export GH_TOKEN=...   # or: gh auth login",
   "redact": "secret",
@@ -640,9 +656,36 @@ and §11 is where it is on the record.**
 }
 ```
 
-`redact: "secret"` means the evidence records `<set, 40 chars, ghp_…>`.
-`non_empty` still resolves correctly against that, because presence survives
-redaction by construction — which is why the shape string leads with `<set,`.
+Read the probe carefully: it emits the literal `set`, never the token. `-n` in
+the shell tests the value without printing it, so the secret never reaches
+stdout, never enters `evidence.json`, and never exists anywhere for a later
+mistake to expose.
+
+`printenv GH_TOKEN` would have been shorter and is **forbidden** — it puts the
+value in the probe's stdout, which is reading it. The shaping in the runner
+would have caught that particular case, but relying on it inverts the
+guarantee: shaping is the backstop, not-reading is the rule. AGENTS.md
+§ *Never read a secret* is normative here.
+
+The same shape applies to files. To check `.npmrc`:
+
+```json
+{
+  "id": "pm.npmrc.auth_present",
+  "title": ".npmrc carries an auth token",
+  "applies_if": "test -f .npmrc",
+  "probe": "grep -c '_authToken' .npmrc || true",
+  "expect": { "type": "numeric_gt", "actual": "$probe", "value": 0 },
+  "severity": "info",
+  "decisive": false,
+  "redact": "secret",
+  "notes": "grep -c counts lines; grep without -c would put the token in stdout."
+}
+```
+
+`grep -c` yields a count. `grep '_authToken=.*'` would yield the token — a one
+character difference between a check and a leak, which is why the rule is
+stated as *never open the file* rather than *be careful with the file*.
 
 ### An override, and a non-decisive check
 
@@ -739,6 +782,15 @@ Stated rather than discovered later.
 - **The denylist is not a sandbox.** §6 says so explicitly. The read-only
   guarantee rests on manifest review and the M5 fixture test; the denylist
   catches accidents, not adversaries.
+- **Secret values are unreadable by policy, so some checks cannot exist.**
+  AGENTS.md § *Never read a secret* forbids reading a value at all, not merely
+  storing it. Ferret can therefore report that a token is present, its file's
+  permissions, and whether a workflow references a name it cannot find — but
+  never whether a token is *valid*, *correctly scoped*, or *pointing at the
+  right host on its auth line*. Those are UNKNOWN(unverifiable) with a
+  cross-reference, permanently, and no future milestone should quietly
+  reintroduce them by reading. This is a deliberate loss of coverage in
+  exchange for a guarantee that survives a careless debug print.
 
 ---
 

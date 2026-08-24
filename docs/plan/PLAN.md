@@ -163,8 +163,18 @@ Do this before the manifest grows, because both get harder to retrofit with volu
       before the runner exists, so the guarantee had to start there. Two
       levels because leaking *who you are* and leaking *what the machine is*
       are different threats with different audiences.
+- [x] **Never read a secret** *(landed early)* — probes that would put a
+      credential value on stdout are refused before execution, resolving
+      UNKNOWN(unverifiable). No override, unlike the mutation denylist: there
+      is no probe that legitimately needs a secret's value, so an escape hatch
+      would only ever be used to do the forbidden thing. Binding on agents too;
+      see `AGENTS.md` § *Never read a secret*.
 - [ ] Presence-and-shape recording: `GH_TOKEN: <set, 40 chars, ghp_…>`
-- [ ] Stable salted hashing for credential-shaped values
+      — now a **backstop against an authoring mistake, not the mechanism**. A
+      correctly written probe never produces a value for it to shape
+- [ ] Stable salted hashing for credential-shaped values — same demotion; it
+      answers "same token as before" only in the case where something was
+      wrongly captured
 - [ ] Secret fixtures (fake `GH_TOKEN`, `.npmrc` `_authToken`, remote with embedded creds) asserted absent from both outputs
 - [ ] Read-only test: full sweep against fixture repo, assert working tree + index + config hashes unchanged
 - [ ] `env -i` isolation for shell-state probes
@@ -201,7 +211,11 @@ Now the schema is proven. Populate the highest-value layers.
 
 **Layer 5 — package manager:**
 - [ ] Lockfile count (>1 is a warning), lockfile vs PM version
-- [ ] `.npmrc` registry, scopes, `ignore-scripts`
+- [ ] `.npmrc` registry, scopes, `ignore-scripts` — **without opening the
+      file's auth lines**. `grep -c '_authToken'` for presence, `grep -o
+      '^registry='` for the non-secret setting. Never `cat`, never a match that
+      includes a value: one character (`grep -c` vs `grep`) separates a check
+      from a leak
 - [ ] Registry reachability with timeout
 - [ ] `node_modules` present vs lockfile agreement
 
@@ -228,7 +242,10 @@ Order by value, not by number.
 Last, because it's the only layer needing network, auth, and identity stamping.
 
 - [ ] Detect forge; `applies_if` gates GitHub-only checks
-- [ ] `gh auth status`, token scopes, host config
+- [ ] `gh auth status`, token scopes, host config — scopes come from `gh`'s own
+      reporting, never by reading the token. `gh auth status` prints scopes
+      without printing the credential, which is the pattern to follow: ask the
+      tool what it is authorised to do, do not inspect the secret yourself
 - [ ] Branch protection, required checks on default branch
 - [ ] CI ever passed on default branch
 - [ ] Secret **names** vs names referenced in workflows — the cross-reference for the unverifiable case
