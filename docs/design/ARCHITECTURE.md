@@ -4,7 +4,12 @@
 
 Three stages, strictly ordered. The ordering is the design.
 
+Stage zero comes before all of it: `bootstrap/run.sh` measures the machine with POSIX sh, no Python and no agent, because everything below assumes tools that may not be there. See `docs/design/BOOTSTRAP_PIPELINE.md`.
+
 ```
+  bootstrap/run.sh         stage zero — sh only, no AI, writes default-results.md
+         │
+         ▼
   manifest/*.json          declarative checks — data, not code
          │
          ▼
@@ -36,12 +41,13 @@ Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `
 | File | Role | Audience | Churn |
 |---|---|---|---|
 | `README.md` | What and why, in 60 seconds | Anyone | Low |
-| `docs/FRAMEWORK.md` | The evaluation theory — layers, ambient/declared, capture tiers, why first passes fail | Humans reasoning about coverage | Low |
-| `docs/ARCHITECTURE.md` | This file. How it's built and why | Contributors | Medium |
-| `docs/PLAN.md` | Milestones in dependency order | Whoever is building | High until done |
-| `docs/PROMPT.md` | Standing instruction to Claude Code | Claude Code | Low |
-| `docs/MANIFEST_SCHEMA.md` | Field-by-field spec for a check | Anyone adding checks | Low |
-| `docs/DOCS_MODEL.md` | The three runtime documents, volatility classes, provenance, the baseline rule | Contributors | Low |
+| `docs/design/FRAMEWORK.md` | The evaluation theory — layers, ambient/declared, capture tiers, why first passes fail | Humans reasoning about coverage | Low |
+| `docs/design/ARCHITECTURE.md` | This file. How it's built and why | Contributors | Medium |
+| `docs/plan/PLAN.md` | Milestones in dependency order | Whoever is building | High until done |
+| `docs/plan/PROMPT.md` | Standing instruction to Claude Code | Claude Code | Low |
+| `docs/design/MANIFEST_SCHEMA.md` | Field-by-field spec for a check | Anyone adding checks | Low |
+| `docs/design/BOOTSTRAP_PIPELINE.md` | The pre-runner five: script-measured machine state, preferred stack, do-not-use policy | Contributors | Medium |
+| `docs/design/DOCS_MODEL.md` | The three runtime documents, volatility classes, provenance, the baseline rule | Contributors | Low |
 | `AGENTS.md` | Agent-facing repo conventions; `CLAUDE.md` is a thin pointer to it | Any coding agent | Low |
 
 **`FRAMEWORK.md` is rationale; `manifest/` is contract.** The framework explains *why* clock skew matters. The manifest states *how* to probe it and *what* counts as passing. Prose does not drive execution — if a check isn't in the manifest, it doesn't run, no matter how well the framework argues for it.
@@ -65,7 +71,7 @@ Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `
 | `<repo>/.ferret/evidence.json` | Raw probe results | No |
 | `<repo>/.ferret/raw/` | Untruncated probe stdout, for debugging Ferret itself | No |
 
-`.ferret/` is gitignored on creation, in the same commit that creates it — with an explicit un-ignore for `requirements.md`, which is the one artifact meant to travel. See `docs/DOCS_MODEL.md`.
+`.ferret/` is gitignored on creation, in the same commit that creates it — with an explicit un-ignore for `requirements.md`, which is the one artifact meant to travel. See `docs/design/DOCS_MODEL.md`.
 
 ---
 
@@ -88,7 +94,7 @@ A partial answer that announces its partiality is the correct behavior. A partia
 
 ## 4. The check record
 
-Full field spec in `docs/MANIFEST_SCHEMA.md`. Shape:
+Full field spec in `docs/design/MANIFEST_SCHEMA.md`. Shape:
 
 ```json
 {
@@ -231,16 +237,19 @@ If any blocker is outstanding, it refuses to run and says `NOT ATTEMPTED (blocke
 Ferret converges a machine toward operational, and documents as it goes. That requires mutation. The rule is not *never mutate* — it is **never mutate before a clean baseline is written.**
 
 ```
-observe → write baseline → remediate → re-observe → document → (next time) verify
+derive stack → observe → write baseline → propose → approve → remediate → re-observe → document → (next time) verify
 ```
 
 Enforced as follows:
+
+- **Nothing installs before the proposal is approved.** Everything the stack needs and the machine lacks goes into one editable list, with the preferred tool and its ordered fallbacks visible *before* approval. Discovering the second choice at execution time — after approval, when nobody is looking — is the surprise this design exists to prevent. `--approve` accepts as-is; `--edit` drops lines, pins versions, or forces a fallback. See `docs/design/BOOTSTRAP_PIPELINE.md` §4.
+- **The do-not-use list filters before the proposal is built, not after.** A forbidden tool never appears in the list for review. If a ban empties a fallback chain, that surfaces as an honest dead end — *"no remaining option; six checks stay UNKNOWN"* — rather than being quietly worked around. §5.
 
 - **Phase 1 (observe) is read-only, no exceptions.** The mutation denylist and the byte-identical fixture test from §8 apply here in full. This phase must work with nothing but `sh` and coreutils.
 - **The baseline is written before any mutation.** If it can't be written, Ferret exits 3 rather than proceed. This preserves the ability to answer *"was this broken before I got here?"* — which is the entire value of a diagnostic tool.
 - **Phase 3 (remediate) is opt-in** (`--remediate`), logged, and every change tagged `ferret-installed` with method and timestamp.
 - **Failed remediation is never fatal.** No sudo, no egress, TLS interception, immutable FS, broken package manager — each is itself a high-priority finding. Ferret records the failure, notes which checks now run in reduced mode, and emits the diagnosis it already collected. The machines where remediation fails are the machines that need the report most.
-- **Provenance is mandatory.** Untagged, Ferret reports its own footprint as a finding — the false positive that gets a tool ignored. See `docs/DOCS_MODEL.md` §4.
+- **Provenance is mandatory.** Untagged, Ferret reports its own footprint as a finding — the false positive that gets a tool ignored. See `docs/design/DOCS_MODEL.md` §4.
 
 `--footprint` lists what Ferret installed; `--revert` undoes it.
 
