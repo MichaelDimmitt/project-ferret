@@ -14,51 +14,64 @@ picks up mid-build. Read both.
 ## The prompt
 
 ```
-You are continuing Ferret Sniffer. Stage zero is built, tested, and
-committed. The Go runner is not written yet. Take it to the finish line.
+You are continuing Ferret Sniffer. M0-M4 are built, tested, and committed:
+the pipeline runs end to end, but the manifest is empty, so it currently
+checks nothing. Take it to the finish line.
 
 FIRST, ORIENT — do this before proposing anything
 
   1. Read docs/plan/PROMPT.md in full. It is the standing instruction:
      the design, the invariants, and what good looks like. Everything
      below assumes it.
-  2. Read these, in order:
+  2. Read AGENTS.md. Two rules there bind you directly, not just the
+     code you write: never read a secret, and read machine state from
+     bootstrap/default-results.md rather than guessing it.
+  3. Read these, in order:
        README.md                        what the tool is
        docs/design/ARCHITECTURE.md      how it is built, and why
-       docs/design/LANGUAGE_CHOICE.md   why Go, what mise changes
-       docs/design/BOOTSTRAP_PIPELINE.md stage zero, already built
+       docs/design/MANIFEST_SCHEMA.md   THE CONTRACT — every field, every
+                                        expect type, and §11's known limits
        docs/design/DOCS_MODEL.md        the three documents
        docs/plan/PLAN.md                milestones, in dependency order
      docs/design/FRAMEWORK.md is rationale for coverage, never a spec.
+     LANGUAGE_CHOICE.md and BOOTSTRAP_PIPELINE.md are settled background;
+     read them if a decision turns on why Go or how stage zero works.
      Never execute from prose.
-  3. Determine the current milestone from PLAN.md checkboxes and the
+  4. Determine the current milestone from PLAN.md checkboxes and the
      repo state, NOT from anything I say. Restate it in one line.
-  4. Run ./tests/run.sh and ./bootstrap/run.sh. Confirm green before
-     you change anything. If either fails, fix that first and say so.
+  5. Run ./tests/run.sh. Confirm green before you change anything. If it
+     fails, fix that first and say so.
 
 WHERE THINGS STAND
 
-  Built and committed:
+  Built, tested, committed:
     bootstrap/run.sh + scripts/os/{common,darwin,linux}.sh
-      Stage zero. POSIX sh, per-OS dispatch on `uname -s`, writes
-      bootstrap/default-results.md. Verified under dash. An unknown OS
-      runs the common core and records os-support: unknown.
-    scripts/lib/redact.sh
-      Two-level redaction (identity / paranoid), applied inside cell()
-      so no probe can bypass it. Sourceable standalone.
-    tests/run.sh
-      Two test files, 40 assertions, plus shellcheck. All green.
-    mise.toml, go.mod, ferret/main.go
-      Toolchain pinned to Go 1.23. main.go is a stub that exits 3.
+      Stage zero. POSIX sh, per-OS dispatch, writes default-results.md.
+      Still the only part a user can run today and learn something from.
+    ferret/manifest.go    loading + the twelve §8 validation rules
+    ferret/runner.go      probes, timeouts, denylists. Interprets nothing.
+    ferret/verdict.go     GO/NO-GO/UNKNOWN/N-A, taint, exit codes
+    ferret/semver.go      exactly the range table in §4, nothing more
+    ferret/render.go      the glance -> stdout + .ferret/status.md
+    ferret/redact.go      capture-time filtering (a backstop; see below)
+    tests/run.sh          shell suite + shellcheck + go vet/test/gofmt
+      137 Go assertions plus the shell tests. All green.
+
+  THE GAP THAT MATTERS: manifest/ holds _schema.json and a README, and
+  no checks at all. `./scripts/sweep.sh` runs the whole pipeline and
+  reports on nothing. Everything above is machinery waiting for M7 to
+  give it work.
+
+  Toolchain: mise is installed and provides the pinned Go 1.23. If `go`
+  is missing, `mise install` restores it — it is already approved, so
+  this is not a new install decision.
 
   NOT done — this is your work:
-    M1  schema + runner core          <- start here
-    M2  verdict engine
-    M3  taint
-    M4  the glance (the actual product)
-    M5  redaction in the runner, read-only hardening
+    M5  redaction + read-only hardening   <- start here
     M6  bootstrap fallback
-    M7  the checks that matter
+    M7  the checks that matter            <- the milestone that creates
+                                             user value; nothing before
+                                             it does
     M8  remaining layers
     M9  forge
     M10 document emission
@@ -66,23 +79,25 @@ WHERE THINGS STAND
     M11 remediation
     M12 cross-project reuse
     M13 golden path
+    Also open, carried from M3: verdict-time cycle detection. Load-time
+    detection exists; the verdict-time guard and exit-3 path do not.
 
-  NEVER VERIFIED, because this machine has no Go toolchain:
-    ferret/main.go has never been compiled. `mise install` first, then
-    `go vet ./...` and `go build`. Expect to fix it. Do not assume it
-    is correct because it is short.
+WHAT CHANGED SINCE THE PLAN WAS WRITTEN — read PLAN.md's inline notes
 
-START WITH M1, AND STOP IN THE MIDDLE OF IT
+  The plan has been edited where reality diverged, and each divergence
+  says why. Three worth knowing before you start:
 
-  M1 is the contract. Every later milestone is expensive to change
-  against a wrong schema, so it gets reviewed before it is built on.
-
-  1. Write docs/design/MANIFEST_SCHEMA.md — every field, every `expect`
-     type, worked examples. Then STOP and ask me to read it. Do not
-     write runner.go until I have.
-  2. After I approve: manifest/_schema.json, validated before any probe
-     executes.
-  3. Then ferret/runner.go.
+  - Taint landed in M2, not M3. A NO-GO prerequisite whose dependents
+    rendered green would have been a false green shipped for a whole
+    milestone.
+  - "Never read a secret" is now a standing rule (AGENTS.md), stronger
+    than the redaction M5 was scoped around. Ferret determines a secret
+    EXISTS; it never learns the value. Shaping/hashing still exist but
+    are a backstop against an authoring mistake, not the mechanism. This
+    permanently removes some checks — token validity, auth-line contents
+    — which are UNKNOWN(unverifiable) forever. Do not reintroduce them.
+  - The glance has a NOTED section that is not in the plan. Non-decisive
+    checks that FAILED were being swallowed by the "n passed" count.
 
 HOW TO WORK
 
@@ -92,8 +107,8 @@ HOW TO WORK
 
   COMMIT AFTER EACH MILESTONE, and after each self-contained piece
   within one. Every commit must stand alone: it builds, its tests pass,
-  and it is a usable bisect point. Verify that — checkout the commit
-  and run the tests — rather than assuming it.
+  and it is a usable bisect point. Verify that — clone to a temp dir,
+  checkout the commit, run the tests — rather than assuming it.
 
   Commit messages: what changed and WHY. State the bug a fix fixes and
   how it manifested. Say what you verified and what you could not.
@@ -101,8 +116,12 @@ HOW TO WORK
 
   Work on a branch. Do not push or open a PR unless I ask.
 
-  Run ./tests/run.sh before every commit. It runs shellcheck too.
-  For Go: `go vet ./...` and `gofmt -l .` must be clean.
+  Run ./tests/run.sh before every commit. It runs shellcheck, go vet,
+  go test, and gofmt.
+
+  CHECKING EXIT CODES: redirect to a file, never pipe to tail or grep.
+  `cmd | tail` reports tail's exit code, and that has already produced
+  two false "verified" claims in this project.
 
   Stop and ask when a decision contradicts ARCHITECTURE.md, when exit
   criteria are ambiguous, or when a design choice is load-bearing and
@@ -110,33 +129,25 @@ HOW TO WORK
 
 INVARIANTS — violating any is a failed milestone, not a tradeoff
 
-  Full list in docs/plan/PROMPT.md. The ones most at risk from here:
+  Full list in docs/plan/PROMPT.md and AGENTS.md. Most at risk from here:
 
   - Go standard library only. No third-party modules. Not one.
-  - The runner never interprets. It records raw stdout, stderr, exit
-    code, duration. If the runner imports the verdict package, the
-    design is broken. Keep them separate processes, not just packages.
-  - No code path converts UNKNOWN into GO. Assert it in a test.
-  - Phase 1 is read-only. Nothing installs, fetches, pulls, clones,
-    writes config, or starts a service. Enforced by a denylist AND by a
-    test asserting a fixture repo is byte-identical after a sweep.
+  - Never read a secret — not to hash it, not to redact it, not in
+    passing. Test for presence; mark the file; never open it. Binds you
+    directly, not only the probes you write.
+  - The runner never interprets. If runner.go reads `expect`,
+    `severity`, `remedy`, or `tainted_by`, the design is broken.
+  - No code path converts UNKNOWN into GO.
+  - Phase 1 is read-only. M5 owes the test asserting a fixture repo is
+    byte-identical after a sweep.
   - Nothing mutates before a baseline is written. Exit 3 instead.
-  - Nothing installs before the proposed list is approved. Preferred
-    tool and ordered fallbacks are shown before approval, never
-    discovered at execution time.
-  - mise is proposed, never silently installed — not even to satisfy
-    Ferret's own runtime. If it is declined, that is a finding: fall
-    back to Tier-1 shell checks and report UNKNOWN, never GO.
-  - Redaction is allowlist, at capture time, in the runner — never in
-    the renderer. scripts/lib/redact.sh is the shell precedent; the Go
-    side must agree with it on what "redacted" means.
+  - Nothing installs before the proposed list is approved. mise is
+    proposed, never silently installed — including for Ferret's own
+    runtime.
   - Every fact carries provenance. Every NO-GO carries a remedy.
   - Exit code 2 (unknowns present) is never collapsed into 0.
-  - .ferret/ is gitignored in the same commit that first creates it,
-    with an un-ignore for requirements.md — that rule is not in
-    .gitignore yet and M10 needs it.
-  - status.md is not gitignored yet either. M4 creates it. Add the rule
-    in the commit that creates the file.
+  - .ferret/ is gitignored; M10 must add the un-ignore for
+    requirements.md in the same commit that first writes it.
 
 WHAT GOOD LOOKS LIKE
 
@@ -150,9 +161,9 @@ WHAT GOOD LOOKS LIKE
   than partially. Once M10 lands, a false positive gets written into a
   document and outlives the run that produced it.
 
-  At M4, run it on this actual machine and read the output. If it does
-  not tell you something true in ten seconds, the format is wrong and
-  that is the cheap moment to say so — not after eighty checks exist.
+  M7 IS WHERE THIS BECOMES USEFUL. Everything committed so far is
+  machinery. Precision over coverage: every reported NO-GO must be real,
+  and every false positive is a bug, not a rough edge.
 
 START
 
@@ -163,29 +174,29 @@ State the current milestone. Confirm the tests are green. Then begin.
 
 ## Notes for whoever pastes this
 
-**Two intervention points are deliberate.** After `MANIFEST_SCHEMA.md` (before
-any runner code) and after M4 (the first time output is readable). Both are
-moments where a wrong call is cheap now and expensive later. The prompt
-instructs a stop at the first; the second is on you to actually do.
+**The format has been read and judged.** M4's intervention point is done: the
+glance was run against a real machine, found four defects by being read rather
+than tested, and they were fixed. The remaining open questions on it are
+listed at the end of that session — placeholder sections, one glyph for both
+warnings and blockers, and a passed-count that names nothing.
 
-**The Go stub is unverified.** No toolchain existed on the machine where it was
-written. That is stated in the prompt rather than hidden, because a session
-that assumes it compiles will waste time confused.
+**The next intervention point is during M7**, and it is the important one.
+Every false positive is a bug report. The plan says run against three real
+repos of different shapes; do that on repos you know well enough to spot a
+wrong answer, because a plausible-looking wrong answer is the failure mode
+that matters.
 
-**Known gaps deliberately left for their milestone**, rather than fixed early:
+**Known gaps deliberately left for their milestone:**
 
 | Gap | Belongs to |
 |---|---|
-| `status.md` not gitignored | M4, which creates it |
 | `.ferret/` un-ignore for `requirements.md` | M10, which creates it |
 | Manifest schema has no fields for preferred tool / fallbacks / install gating | M10.5 |
 | `ferret/bootstrap.sh` does not exist | M6 |
-
-The first two are listed in the prompt because forgetting them means committing
-a machine-specific file, and the `.gitignore`-in-the-same-commit rule exists
-precisely to prevent that.
+| Verdict-time cycle detection | M3's remainder |
 
 **Where to push back.** If a milestone's exit criteria turn out to be wrong
 once there is real code, the plan should change — a stale plan is worse than no
 plan. That is explicitly allowed, and it is better than quietly building
-something that does not match.
+something that does not match. This document has itself been rewritten once for
+exactly that reason.
