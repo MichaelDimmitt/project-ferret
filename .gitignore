@@ -1,6 +1,13 @@
 # Ferret's own state — never committed (see docs/DOCS_MODEL.md)
 .ferret/
 
+# Machine-specific bootstrap artifacts — scripts/*.example is the committed
+# reference; these describe one machine and never travel.
+# See docs/design/BOOTSTRAP_PIPELINE.md.
+bootstrap/default-script.sh
+bootstrap/default-results.md
+!*.example
+
 # macOS
 .DS_Store
 
