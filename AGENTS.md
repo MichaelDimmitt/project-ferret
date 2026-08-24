@@ -1,12 +1,24 @@
 # Repo conventions
 
-Start with `docs/plan/PROMPT.md`. It is the standing instruction for work in this repo.
+**Read `docs/SPIRIT.md` first.** It is short, and it is what everything else
+is for: an aid, not an authority — something you drop on a machine that tells
+you what is wrong in seconds and asks before it acts. When a design document
+says to do something that fails the tests in SPIRIT.md, that is worth stopping
+over rather than following.
+
+**`docs/REASSESSMENT.md` records where this repo drifted from that**, with the
+measurements behind the finding. In short: the checks are the product, and the
+3,100-line Go engine that runs them needs a 261 MB toolchain to save 0.7
+seconds. `simple-ferret` is the restatement; this repo is the reference
+implementation and the source of record. Read it before extending the engine.
+
+Then: `docs/plan/PROMPT.md` is the standing instruction for work in this repo.
 `HOW.md` says what to run and in what order.
 `docs/plan/CONTINUE.md` is the re-pasteable prompt for resuming the build.
 
-Reading order: `README.md` → `docs/design/ARCHITECTURE.md` → `docs/design/DOCS_MODEL.md` →
-`docs/plan/PLAN.md`. `docs/design/FRAMEWORK.md` is rationale for coverage decisions, not a
-spec — never execute from it.
+Reading order: `docs/SPIRIT.md` → `README.md` → `docs/design/ARCHITECTURE.md` →
+`docs/design/DOCS_MODEL.md` → `docs/plan/PLAN.md`. `docs/design/FRAMEWORK.md` is
+rationale for coverage decisions, not a spec — never execute from it.
 
 ## Hard rules
 
