@@ -40,6 +40,7 @@ if command -v shellcheck >/dev/null 2>&1; then
       "$root"/scripts/lib/*.sh \
       "$root"/scripts/os/*.sh \
       "$root"/bootstrap/run.sh \
+      "$root"/ferret/bootstrap.sh \
       "$root"/scripts/sweep.sh \
       "$root"/tests/*.sh; then
     echo "shellcheck: clean"

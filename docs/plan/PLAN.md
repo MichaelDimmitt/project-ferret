@@ -247,12 +247,45 @@ wrong reason is worse than no test.
 
 ## M6 — Bootstrap fallback
 
-- [ ] `ferret/bootstrap.sh`, POSIX sh, Tier-1 checks only
-- [ ] Emits partial `status.md`, verdict **UNKNOWN**, never GO
-- [ ] Header states plainly: `runner unavailable — N of M checks not run`
-- [ ] `scripts/sweep.sh` detects and delegates
+- [x] `ferret/bootstrap.sh`, POSIX sh, Tier-1 checks only
+- [x] Emits partial `status.md`, verdict **UNKNOWN**, never GO
+- [x] Header states plainly: `runner unavailable — N of M checks not run`
+- [x] `scripts/sweep.sh` detects and delegates — already wired at M0; the
+      file it looks for simply did not exist. No change needed
+- [ ] Verified in a container with no Go toolchain — **not done**, see below
 
-**Exit:** works in a container with no Go toolchain and mise declined. Verdict is UNKNOWN, and the reason is the first thing on screen.
+**Deliberately thin, and here is the boundary.** ARCHITECTURE.md §3 names
+eight Tier-1 areas: clock, disk, inodes, arch, libc, PATH, CA, git state. All
+eight are implemented, but only with the assertions whose answer is
+unambiguous today. M7 decides what these checks actually assert, and writing
+that here first would mean two implementations of the same rule drifting
+apart — the fallback is a floor, not a second manifest.
+
+**`N of M` when M is unknowable.** The header wants a denominator, and the
+denominator lives in a JSON manifest a POSIX sh script cannot parse. It counts
+`"id":` occurrences with grep — a count, not a parse, and honest about being
+approximate. With the manifest still empty it says `8 Tier-1 checks run; the
+full manifest was never read` rather than printing a fake `0 of 0`.
+
+**Exit:** met on this machine, not in a container. `sweep.sh` with no Go on
+PATH delegates, states why, and repeats that mise is never installed
+automatically. A clean fixture repo with all eight checks passing exits **2**
+and headlines **UNKNOWN** — never 0, never GO, which is the one property that
+cannot regress. The container run remains open; it needs Docker and is worth
+doing when a container is at hand, but the invariant it would protect is
+already asserted by `tests/bootstrap-fallback-test.sh`.
+
+**A defect found by running it, not by testing it.** The first version printed
+`VERDICT UNKNOWN` while exiting 1 when it found a blocker, so a human reading
+the screen and a CI job reading `$?` got different answers from the same run.
+The headline now follows `render.go`'s precedence — blockers outrank unknowns
+— while the GO branch stays absent, because "nothing failed" here is a
+statement about eight checks rather than about the machine.
+
+The test normalises `PATH` before running. Inherited, it took whichever branch
+the developer's own dotfiles produced — on this machine, 10 duplicated PATH
+entries meant it exited 1 and the exit-2 assertion never ran. A test whose
+coverage depends on the tester's shell config is not a test.
 
 ---
 
