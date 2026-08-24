@@ -267,6 +267,53 @@ func TestSecretsReachNeitherEvidenceNorStatus(t *testing.T) {
 	assertNoSentinel(t, "status.md", status.String())
 }
 
+// TestSecretRedactionKeepsMeasurements pins the M7 dispatch bug.
+//
+// applyRedaction called shapeOf directly, so shapeLines -- the function
+// written precisely so that `registry=` and `ignore-scripts=` survive
+// redaction -- was unreachable from the only path that reaches it in
+// production. Every secret-level capture became `<set, N chars, hash …>`,
+// including a bare count. `grep -c '_authToken' .npmrc` returned `1`, which
+// was shaped, so an `equals "0"` expectation could not evaluate: the check
+// could neither pass nor honestly fail.
+//
+// It was found by dumping evidence.json for a real repo and reading the
+// captured values, not by any test -- which is why there is now a test.
+//
+// Both directions are asserted. A measurement that gets shaped is a broken
+// check; a credential that does not is a leak.
+func TestSecretRedactionKeepsMeasurements(t *testing.T) {
+	keep := []string{
+		"0",
+		"1",
+		"present",
+		"absent",
+		"v24.13.1",
+		"registry=https://registry.npmjs.org/",
+		"ignore-scripts=true",
+	}
+	for _, in := range keep {
+		if got := applyRedaction(in, RedactSecret, RedactNone); got != in {
+			t.Errorf("applyRedaction(%q) = %q; a measurement must survive "+
+				"redaction or its expectation can never evaluate", in, got)
+		}
+	}
+
+	shaped := []string{
+		sentinelNpm,
+		"//registry.npmjs.org/:_authToken=" + sentinelNpm,
+		"NPM_TOKEN=" + sentinelNpm,
+	}
+	for _, in := range shaped {
+		got := applyRedaction(in, RedactSecret, RedactNone)
+		if got == in {
+			t.Errorf("applyRedaction(%q) returned it unchanged; a credential "+
+				"must be shaped", in)
+		}
+		assertNoSentinel(t, "shaped credential", got)
+	}
+}
+
 func mustMarshal(t *testing.T, ev *Evidence) string {
 	t.Helper()
 	dir := t.TempDir()

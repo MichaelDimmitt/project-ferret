@@ -61,6 +61,39 @@ func itoa(n int) string {
 	return string(b)
 }
 
+// A remedy interpolates §5's tokens, exactly as `expect` values do.
+//
+// MANIFEST_SCHEMA.md §5 says interpolation applies "Inside `expect` values,
+// `remedy`, and nowhere else", and §3's own example is `nvm use $declared`.
+// Only expect was wired up: Evaluate assigned c.Remedy raw, so every remedy
+// using a token printed it literally and handed the reader a command naming
+// an unset shell variable. Found in M7 by reading a rendered glance, not by a
+// test -- the check itself was correct and only its advice was broken, which
+// is the kind of defect that survives a green suite.
+func TestRemedyInterpolatesTokens(t *testing.T) {
+	rec := `{"id": "r.pin", "applies": true,
+	  "probe": {"stdout": "v24.13.1", "stderr": "", "exit": 0, "duration_ms": 1},
+	  "declared": {"stdout": "20.15.1", "stderr": "", "exit": 0, "duration_ms": 1},
+	  "provenance": "observed"}`
+
+	rep := evaluate(t, `{
+	  "layer": 4,
+	  "checks": [
+	    {"id": "r.pin", "title": "Node matches pin", "probe": "node -v",
+	     "declared": "cat .nvmrc",
+	     "expect": {"type": "semver_satisfies", "actual": "$probe", "range": "$declared"},
+	     "severity": "blocker", "remedy": "nvm use $declared   # was $probe"}
+	  ]
+	}`, evidenceWith(rec))
+
+	got := verdictFor(t, rep, "r.pin").Remedy
+	want := "nvm use 20.15.1   # was v24.13.1"
+	if got != want {
+		t.Errorf("remedy = %q, want %q; an uninterpolated remedy names a\n"+
+			"shell variable that is not set, which is worse than no remedy", got, want)
+	}
+}
+
 // ============================================================
 // THE INVARIANT
 // ============================================================

@@ -65,7 +65,7 @@ func applyRedaction(s string, checkLevel, globalLevel Redact) string {
 	level := stricter(checkLevel, globalLevel)
 	switch level {
 	case RedactSecret:
-		return shapeOf(s)
+		return shapeSecret(s)
 	case RedactIdentity:
 		return redactIdentity(s)
 	default:
@@ -175,6 +175,65 @@ var assignmentRe = regexp.MustCompile(`^([A-Za-z0-9_./:@-]*[A-Za-z0-9_])\s*([=:]
 // an entry each.
 var credentialKeyRe = regexp.MustCompile(
 	`(?i)(token|secret|password|passwd|apikey|api_key|credential|private_key|auth|session|cookie|signature|_key$|^key$)`)
+
+// shapeSecret is the entry point for redact: "secret", and it exists because
+// routing straight to shapeOf defeated the very fix shapeLines was written to
+// be.
+//
+// The bug, found in M7 by reading captured evidence rather than a verdict:
+// applyRedaction called shapeOf unconditionally, so shapeLines was unreachable
+// from the only path that reaches it in production. Every secret-level capture
+// came back as `<set, N chars, hash …>` -- including the ones the comment on
+// credentialKeyRe explicitly says must survive. `grep -c '_authToken' .npmrc`
+// returned the count `1`, which was shaped into a hash, so an `equals "0"`
+// expectation could never evaluate: the check could not pass and could not
+// honestly fail. That is the unimplementable-at-redact-secret failure PLAN.md
+// predicted for M7, arriving exactly where it was predicted.
+//
+// Two shapes of capture reach here and they need different handling:
+//
+//   - Assignment-structured (`registry=…`, an .npmrc, an env dump). shapeLines
+//     shapes only credential-keyed values, so `registry=` and `ignore-scripts=`
+//     keep values the M7 checks must read while a token line is still shaped.
+//   - Unstructured (`1`, `present`, a version string). A bare count carries no
+//     secret, and shaping it destroys the check. But an unstructured capture
+//     COULD be a naked token, so it is shaped when it looks like one --
+//     recognisable prefix, or long enough and without whitespace to plausibly
+//     be a credential rather than a measurement.
+//
+// Erring toward shaping on the unstructured path: the cost of shaping a
+// measurement is a broken check, which is loud and gets fixed. The cost of not
+// shaping a credential is a leak, which is silent. The bare-count case is
+// narrow and explicit rather than the default.
+func shapeSecret(s string) string {
+	if strings.Contains(s, "=") || strings.Contains(s, ":") {
+		return shapeLines(s)
+	}
+	if looksLikeCredential(s) {
+		return shapeOf(s)
+	}
+	return s
+}
+
+// looksLikeCredential decides whether an unstructured capture is shaped.
+//
+// The rule is deliberately blunt: a known token prefix, or a single
+// whitespace-free run of 24+ characters. Counts, versions, and words like
+// `present` are none of those. This is a backstop against an authoring
+// mistake, not the guarantee -- AGENTS.md's rule is that the value was never
+// read in the first place.
+func looksLikeCredential(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+	for _, p := range credentialPrefixes {
+		if strings.HasPrefix(trimmed, p) {
+			return true
+		}
+	}
+	return len(trimmed) >= 24 && !strings.ContainsAny(trimmed, " \t\n")
+}
 
 // shapeLines handles captures with several lines -- an `env` dump, an
 // .npmrc. Only credential-keyed values are shaped; the rest survive, because

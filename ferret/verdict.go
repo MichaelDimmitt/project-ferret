@@ -120,7 +120,27 @@ func Evaluate(m *Manifest, ev *Evidence) (*Report, error) {
 		v.Severity = c.Severity
 		v.Decisive = c.IsDecisive()
 		if v.State == StateNoGo {
-			v.Remedy = c.Remedy
+			// MANIFEST_SCHEMA.md §5: interpolation applies inside `expect`
+			// values AND `remedy`. Only expect was wired up, so every remedy
+			// using a token printed it literally -- the schema's own example,
+			// `nvm use $declared`, rendered as the four characters "$decl"
+			// followed by "ared" and handed the user a command that cannot
+			// work. A wrong remedy is worse than none (PLAN.md), and a remedy
+			// naming a shell variable that is not set is wrong.
+			//
+			// A remedy is only ever attached to a NO-GO, so rec is non-nil
+			// here: a nil record resolves UNKNOWN(expired) above and never
+			// reaches this branch.
+			//
+			// On an interpolation error the raw text survives rather than
+			// being dropped. A remedy that reads awkwardly still tells the
+			// reader what to do; an empty one tells them nothing, and this is
+			// the one field PLAN.md requires every NO-GO to carry.
+			if s, err := interpolate(c.Remedy, rec); err == nil {
+				v.Remedy = s
+			} else {
+				v.Remedy = c.Remedy
+			}
 		}
 
 		rep.Verdicts = append(rep.Verdicts, v)
