@@ -13,7 +13,7 @@
 
 set -u
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(dirname -- "$here")
 lib="$root/scripts/lib/redact.sh"
 
@@ -57,6 +57,7 @@ check_sub() {
          FERRET_REDACT=1
          FERRET_REPO="/tmp/fake-repo"
          export FERRET_REDACT FERRET_REPO
+         # shellcheck disable=SC1090
          . "$lib"
          redact "$input" )
   if [ "$got" = "$want" ]; then
@@ -67,6 +68,7 @@ check_sub() {
 }
 
 u=$(id -un 2>/dev/null)
+# shellcheck disable=SC2088  # literal "~" is the expected redaction output
 check_sub "home -> ~"          "$HOME/projects/x"  "~/projects/x"
 check_sub "username -> <user>" "run by $u"         "run by <user>"
 check_sub "repo -> <repo>"     "/tmp/fake-repo/a"  "<repo>/a"
@@ -76,6 +78,7 @@ got=$( set -u
        FERRET_REDACT=1
        FERRET_REPO="$HOME/code/proj"
        export FERRET_REDACT FERRET_REPO
+       # shellcheck disable=SC1090
        . "$lib"
        redact "$HOME/code/proj/file.sh" )
 if [ "$got" = "<repo>/file.sh" ]; then
@@ -88,6 +91,7 @@ fi
 got=$( set -u
        FERRET_REDACT=1
        export FERRET_REDACT
+       # shellcheck disable=SC1090
        . "$lib"
        redact "cp $HOME/a /tmp/b # $u" )
 case "$got" in
@@ -100,6 +104,7 @@ esac
 # The extra level-2 stripping is per-fact (row_posture), not substitution, but
 # identity must still be gone.
 got=$( set -u; FERRET_REDACT=2; export FERRET_REDACT; . "$lib"; redact "$HOME/x" )
+# shellcheck disable=SC2088  # literal "~" is the expected redaction output
 if [ "$got" = "~/x" ]; then
   ok "level 2 still substitutes identity"
 else

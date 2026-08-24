@@ -20,6 +20,8 @@
 # guarantee hold: a new probe cannot forget to redact.
 _rd_lib="${FERRET_LIB_DIR:-$(dirname -- "${OS_DIR:-.}")/lib}/redact.sh"
 if [ -r "$_rd_lib" ]; then
+  # shellcheck source=scripts/lib/redact.sh
+  # shellcheck disable=SC1090
   . "$_rd_lib"
 else
   echo "common.sh: missing $_rd_lib" >&2

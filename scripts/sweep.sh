@@ -25,7 +25,7 @@
 
 set -u
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(dirname -- "$here")
 
 bin="$root/ferret/ferret"

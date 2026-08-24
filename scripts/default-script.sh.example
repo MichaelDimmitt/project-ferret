@@ -25,7 +25,7 @@ OUT="${1:-default-results.md}"
 
 # Where the probe scripts live. Overridable so an adapted copy in bootstrap/
 # can still find them, and so tests can point at fixtures.
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 if [ -d "$here/os" ]; then
   OS_DIR="${FERRET_OS_DIR:-$here/os}"
 else

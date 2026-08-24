@@ -6,6 +6,11 @@
 #
 # Contract: docs/design/BOOTSTRAP_PIPELINE.md §2.
 #
+# SHELL_DIRS, WRITE_DIRS and DNS_PROBE are read by the probe functions in
+# common.sh, which sources this file. shellcheck cannot see that across the
+# dynamic source, so it reports them unused.
+# shellcheck disable=SC2034
+#
 # "Linux" is not one platform. Alpine is musl with busybox coreutils; Debian
 # is glibc with GNU. Probes here must survive both, which mostly means not
 # assuming a tool exists because it does on Ubuntu.
@@ -57,10 +62,21 @@ probe_os() {
       libc=unknown
     fi
     row "libc" "$libc" "-" "-" "ldd --version"
-  elif [ -e /lib/ld-musl-* ] 2>/dev/null; then
-    row "libc" "musl" "-" "-" "ls /lib/ld-musl-*"
   else
-    row "libc" "unknown" "-" "-" "ldd --version"
+    # No ldd — Alpine without the compat package, or a stripped image. The
+    # musl loader is still on disk, so look for it directly.
+    #
+    # `[ -e /lib/ld-musl-* ]` is wrong here: an unquoted glob that matches
+    # passes several arguments to -e, and test fails with "too many
+    # arguments" rather than succeeding. Iterate instead, and check the
+    # literal-glob case that means "no match".
+    libc=unknown
+    for ld in /lib/ld-musl-*; do
+      [ -e "$ld" ] || continue
+      libc=musl
+      break
+    done
+    row "libc" "$libc" "-" "-" "ls /lib/ld-musl-*"
   fi
 
   # Container detection — changes what remediation is even sensible.

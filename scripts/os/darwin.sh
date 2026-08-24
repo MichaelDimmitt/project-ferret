@@ -5,6 +5,11 @@
 # something Linux either lacks or answers differently.
 #
 # Contract: docs/design/BOOTSTRAP_PIPELINE.md §2.
+#
+# SHELL_DIRS, WRITE_DIRS and DNS_PROBE are read by the probe functions in
+# common.sh, which sources this file. shellcheck cannot see that across the
+# dynamic source, so it reports them unused.
+# shellcheck disable=SC2034
 
 # Homebrew owns /opt/homebrew on arm64 and /usr/local on x86_64. MacPorts uses
 # /opt/local. All three can coexist, which is exactly why we search all three.

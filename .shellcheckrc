@@ -1,0 +1,26 @@
+# shellcheck configuration.
+#
+# Run:  shellcheck -s sh scripts/default-script.sh.example scripts/lib/*.sh \
+#         scripts/os/*.sh bootstrap/run.sh scripts/sweep.sh tests/*.sh
+#
+# Everything disabled here is architectural, not an unfixed warning. Real
+# findings must stay visible, so this list is deliberately short and each
+# entry says why.
+
+# SC2016 — "expressions don't expand in single quotes".
+# Intentional and load-bearing. The last column of every results row is the
+# command that produced the fact, stored literally so a human can copy and
+# re-run it. `printf %s "$PATH"` must stay unexpanded; expanding it would
+# defeat the entire point of the provenance column.
+disable=SC2016
+
+# SC1090 — "can't follow non-constant source".
+# The dispatcher picks a probe script at runtime from `uname -s`, and tests
+# source the library by variable path. That indirection is the design; the
+# path cannot be a literal.
+disable=SC1090
+
+# SC1091 — "not following /etc/os-release".
+# A system file that exists on the target machine but not in this repo.
+# Sourcing it is how every distro exposes its identity.
+disable=SC1091

@@ -12,7 +12,7 @@
 
 set -u
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(dirname -- "$here")
 tmp="${TMPDIR:-/tmp}/ferret-redaction-test.$$"
 mkdir -p "$tmp" || exit 1

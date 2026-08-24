@@ -8,7 +8,7 @@
 
 set -u
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
 failed=0
 total=0
