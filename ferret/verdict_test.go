@@ -623,6 +623,96 @@ func TestSchemaVersionMismatchIsRefused(t *testing.T) {
 	}
 }
 
+// A cycle reaching the verdict engine fails loudly and names its members.
+//
+// PLAN.md M3: "Cycle detection fails loudly with the offending ids -- never
+// resolves arbitrarily." The loader enforces that before any probe runs (§8
+// rule 4) and every CLI path goes through it, so this builds the Manifest by
+// hand to reach Evaluate the way an in-process caller could.
+//
+// Without the guard, this did not hang or panic -- it returned a confident
+// wrong answer. Both checks had genuinely failed, and both came back as
+// UNKNOWN(tainted) naming the OTHER as root cause, in a loop: two real NO-GO
+// findings became zero actionable ones, silently. Mutual blame is what
+// "resolves arbitrarily" looks like in practice.
+func TestCycleAtVerdictTimeIsRefused(t *testing.T) {
+	mk := func(id, dep string) Check {
+		return Check{
+			ID: id, Title: id, Severity: "warning", TaintedBy: []string{dep},
+			Expect: Expect{Type: "equals", Raw: map[string]any{
+				"actual": "$probe", "value": "want"}},
+		}
+	}
+	m := &Manifest{Checks: []Check{mk("cy.a", "cy.b"), mk("cy.b", "cy.a")}}
+	ev := &Evidence{SchemaVersion: evidenceSchemaVersion, Records: []Record{
+		{ID: "cy.a", Applies: true, Probe: &RunResult{Stdout: "got"}},
+		{ID: "cy.b", Applies: true, Probe: &RunResult{Stdout: "got"}},
+	}}
+
+	rep, err := Evaluate(m, ev)
+	if err == nil {
+		t.Fatalf("a cyclic taint graph was accepted; verdicts: %+v", rep.Verdicts)
+	}
+	// Both ends named: a cycle error that names one id tells the reader to go
+	// look at a check that is only half the problem.
+	for _, id := range []string{"cy.a", "cy.b"} {
+		if !strings.Contains(err.Error(), id) {
+			t.Errorf("cycle error does not name %s: %v", id, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error should say what kind of problem it is: %v", err)
+	}
+}
+
+// A self-taint is a cycle of length one, and is the easy case to miss.
+func TestSelfTaintIsRefused(t *testing.T) {
+	m := &Manifest{Checks: []Check{{
+		ID: "cy.self", Title: "self", Severity: "warning",
+		TaintedBy: []string{"cy.self"},
+		Expect: Expect{Type: "non_empty", Raw: map[string]any{
+			"actual": "$probe"}},
+	}}}
+	ev := &Evidence{SchemaVersion: evidenceSchemaVersion, Records: []Record{
+		{ID: "cy.self", Applies: true, Probe: &RunResult{Stdout: "x"}},
+	}}
+
+	if _, err := Evaluate(m, ev); err == nil {
+		t.Fatal("a check tainted by itself was accepted")
+	} else if !strings.Contains(err.Error(), "cy.self") {
+		t.Errorf("error does not name the check: %v", err)
+	}
+}
+
+// The acyclic case must survive the new guard untouched -- a cycle check that
+// rejects a legitimate diamond would break every real manifest.
+func TestDiamondTaintIsNotACycle(t *testing.T) {
+	mk := func(id string, deps ...string) Check {
+		return Check{
+			ID: id, Title: id, Severity: "warning", TaintedBy: deps,
+			Expect: Expect{Type: "equals", Raw: map[string]any{
+				"actual": "$probe", "value": "ok"}},
+		}
+	}
+	// root <- left, right <- bottom: two paths to the same ancestor.
+	m := &Manifest{Checks: []Check{
+		mk("d.root"),
+		mk("d.left", "d.root"),
+		mk("d.right", "d.root"),
+		mk("d.bottom", "d.left", "d.right"),
+	}}
+	recs := []Record{}
+	for _, id := range []string{"d.root", "d.left", "d.right", "d.bottom"} {
+		recs = append(recs, Record{ID: id, Applies: true,
+			Probe: &RunResult{Stdout: "ok"}})
+	}
+	ev := &Evidence{SchemaVersion: evidenceSchemaVersion, Records: recs}
+
+	if _, err := Evaluate(m, ev); err != nil {
+		t.Fatalf("a diamond is acyclic and must be accepted: %v", err)
+	}
+}
+
 // ============================================================
 // Exit codes
 // ============================================================

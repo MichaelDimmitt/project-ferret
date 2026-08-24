@@ -123,14 +123,39 @@ could not wait. What remains is the DAG's own machinery.
 - [x] Rollup count on the cause for rendering — *(landed in M2)* the count
       lands on the ROOT cause, and a tainted check drops its own remedy,
       because the fix belongs to the prerequisite
-- [ ] Cycle detection fails loudly with the offending ids — never resolves arbitrarily
-      — load-time detection exists (§8 rule 4, `TestCycleNamesBothEnds`);
-      still to do is the verdict-time guard and the exit-3 path
+- [x] Cycle detection fails loudly with the offending ids — never resolves arbitrarily
+      — load-time detection at §8 rule 4 (`TestCycleNamesBothEnds`), and now a
+      verdict-time guard in `Evaluate` (`findTaintCycle`)
 - [x] Transitive taint through a chain deeper than two — *(landed in M2)* the
       committed fixture chains clock → node → registry, and both dependents
       name the root cause rather than the intermediate
 
 **Exit:** fixture with deliberate clock skew marks its dependents tainted and reports `→ taints N checks below`. Fixture with a cycle exits 3 naming both ends.
+
+**The exit criterion was already met when this was reopened, and the real gap
+was a different one.** Both CLI paths — `-validate` and `-verdict` — already
+exited 3 on the cycle fixture naming both ends, because `LoadManifest` guards
+every route into `Evaluate`. What was actually missing: `Evaluate` is exported,
+and its correctness silently depended on the caller having validated first. An
+assumption stated in a comment is not an assumption enforced.
+
+**What a cycle produced there was worse than a crash.** Handed a hand-built
+cyclic manifest, `Evaluate` did not hang or panic — it returned a *confident
+wrong answer*. Two checks that had both genuinely failed came back as
+UNKNOWN(tainted), each naming the OTHER as its root cause, in a loop. Two real
+NO-GO findings became zero actionable ones, and no error was raised. Mutual
+blame is what "resolves arbitrarily" looks like in practice.
+
+`rootCauseOf` already had a `seen` guard, so the walk terminated — but
+terminating by returning an arbitrary cycle member is a safe loop with a wrong
+answer, which is the failure mode this project treats as worse than a crash.
+It stays as a liveness backstop, now documented as one.
+
+Three tests, and the guard was verified by disabling it and confirming they
+fail: `TestCycleAtVerdictTimeIsRefused`, `TestSelfTaintIsRefused` (a cycle of
+length one, the easy case to miss), and `TestDiamondTaintIsNotACycle` — because
+a cycle check that rejects a legitimate diamond would break every real
+manifest.
 
 ---
 

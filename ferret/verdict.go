@@ -87,6 +87,29 @@ func Evaluate(m *Manifest, ev *Evidence) (*Report, error) {
 			ev.SchemaVersion, evidenceSchemaVersion)
 	}
 
+	// The loader proves the graph is acyclic (§8 rule 4) and every CLI path
+	// goes through it, so this is defence in depth rather than a reachable
+	// bug today. It is here because Evaluate is exported and its correctness
+	// silently depended on the caller having validated first -- an assumption
+	// stated in a comment is not an assumption enforced.
+	//
+	// What a cycle produces without this guard is worse than a crash, and was
+	// confirmed by handing Evaluate a hand-built cyclic manifest: it does not
+	// hang or panic, it returns a confident wrong answer. Two checks that had
+	// both genuinely failed came back as UNKNOWN(tainted), each naming the
+	// OTHER as its root cause, in a loop. Two real NO-GO findings became zero
+	// actionable ones and no error was raised. PLAN.md M3 requires cycles to
+	// fail loudly with the offending ids and never to resolve arbitrarily;
+	// mutual blame is the definition of resolving arbitrarily.
+	//
+	// Returning an error routes to exit 3 in main -- "could not determine" --
+	// which is right: a cyclic manifest is Ferret being misconfigured, not a
+	// finding about the machine.
+	if cycle := findTaintCycle(m); cycle != nil {
+		return nil, fmt.Errorf("tainted_by cycle: %s; the taint graph must be acyclic",
+			strings.Join(cycle, " -> "))
+	}
+
 	byID := make(map[string]*Record, len(ev.Records))
 	for i := range ev.Records {
 		byID[ev.Records[i].ID] = &ev.Records[i]
@@ -209,12 +232,96 @@ func resolveOne(c *Check, rec *Record) Verdict {
 	return Verdict{State: StateNoGo, Detail: detail}
 }
 
+// findTaintCycle returns the members of one tainted_by cycle, closed (the
+// first id appears again at the end), or nil when the graph is acyclic.
+//
+// Iterative DFS with an explicit stack, matching validateTaint in
+// manifest.go rather than inventing a second algorithm for the same
+// question. The two are deliberately separate: the loader rejects a bad
+// manifest before any probe runs, this refuses to interpret one that reached
+// the verdict engine by another route.
+//
+// Checks are walked in manifest order and edges in declaration order, so the
+// cycle reported is a function of the manifest alone. A caller that fixes the
+// named cycle and re-runs must not be handed a different pair of ids from the
+// same file.
+func findTaintCycle(m *Manifest) []string {
+	byID := make(map[string]*Check, len(m.Checks))
+	for i := range m.Checks {
+		byID[m.Checks[i].ID] = &m.Checks[i]
+	}
+
+	const (
+		white = 0 // unvisited
+		grey  = 1 // on the current path
+		black = 2 // fully explored, no cycle through it
+	)
+	color := make(map[string]int, len(m.Checks))
+
+	// frame tracks how far through one node's edges the walk has gone, which
+	// is what an explicit stack needs in place of the call stack.
+	type frame struct {
+		id   string
+		next int
+	}
+
+	for i := range m.Checks {
+		root := m.Checks[i].ID
+		if color[root] != white {
+			continue
+		}
+
+		stack := []frame{{id: root}}
+		color[root] = grey
+		path := []string{root}
+
+		for len(stack) > 0 {
+			top := &stack[len(stack)-1]
+			c := byID[top.id]
+
+			// A dangling reference is rule 3's business, not this function's:
+			// skip it rather than reporting a cycle that is really a typo.
+			if c == nil || top.next >= len(c.TaintedBy) {
+				color[top.id] = black
+				stack = stack[:len(stack)-1]
+				path = path[:len(path)-1]
+				continue
+			}
+
+			dep := c.TaintedBy[top.next]
+			top.next++
+
+			switch color[dep] {
+			case grey:
+				// Closes a cycle. Report from where it closes, so the output
+				// names only the members and not the tail that led there.
+				start := 0
+				for j := range path {
+					if path[j] == dep {
+						start = j
+						break
+					}
+				}
+				return append(append([]string{}, path[start:]...), dep)
+			case white:
+				color[dep] = grey
+				stack = append(stack, frame{id: dep})
+				path = append(path, dep)
+			}
+			// black: already explored and proven clean; nothing to do.
+		}
+	}
+	return nil
+}
+
 // applyTaint walks the dependency DAG and downgrades dependents of NO-GO
 // checks to UNKNOWN(tainted).
 //
-// The manifest loader has already proven the graph is acyclic (§8 rule 4), so
-// this does not need cycle detection -- but it must handle transitive taint:
-// if A is NO-GO and B is tainted by A, then C tainted by B is also tainted.
+// The graph is known acyclic by the time this runs -- the loader proves it at
+// §8 rule 4, and Evaluate re-checks with findTaintCycle before reaching here
+// -- so this does not repeat the check. It must still handle transitive
+// taint: if A is NO-GO and B is tainted by A, then C tainted by B is also
+// tainted.
 func applyTaint(m *Manifest, resolved map[string]*Verdict) {
 	// Iterate to a fixed point. The graph is small (tens of checks) and
 	// acyclic, so this terminates in at most depth passes.
@@ -283,6 +390,13 @@ func applyTaint(m *Manifest, resolved map[string]*Verdict) {
 // acyclic (§8 rule 4), but this must not loop forever even if that guarantee
 // is ever weakened, because a hang in the verdict engine is worse than a
 // wrong verdict -- it produces no report at all.
+// rootCauseOf follows the taint chain to the failure at the bottom.
+//
+// The `seen` guard cannot fire now that Evaluate rejects cycles up front, and
+// it stays because what it does on a cycle is terminate rather than spin. It
+// is a liveness backstop only: on a cycle it would return an arbitrary member,
+// which is the wrong ANSWER even though it is a safe loop. Correctness belongs
+// to findTaintCycle; this just refuses to hang if that is ever bypassed.
 func rootCauseOf(id string, resolved map[string]*Verdict) string {
 	seen := map[string]bool{}
 	for !seen[id] {
