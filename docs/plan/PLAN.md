@@ -54,13 +54,30 @@ same file leaves M2 onward untouched — which is why this milestone spends its
 effort on the schema.
 
 - [x] `docs/design/MANIFEST_SCHEMA.md` — every field, every `expect` type, worked examples
-- [ ] JSON Schema at `manifest/_schema.json`; validation runs before any probe executes
-- [ ] `ferret/runner.go` — loads manifest, evaluates `applies_if`, runs `probe` and `declared`, enforces `timeout_s`, writes `evidence.json`
-- [ ] Four states with mandatory `reason` on UNKNOWN
-- [ ] **Runner performs no interpretation.** It records raw stdout, stderr, exit code, duration. It does not evaluate `expect`.
-- [ ] Mutation denylist with `mutating: false` override
+- [x] JSON Schema at `manifest/_schema.json`; validation runs before any probe executes
+- [x] `ferret/runner.go` — loads manifest, evaluates `applies_if`, runs `probe` and `declared`, enforces `timeout_s`, writes `evidence.json`
+      — loading and validation split into `ferret/manifest.go`; §8's twelve
+      rules are substantial enough to be their own file, and the split keeps
+      `runner.go` to execution
+- [x] Four states with mandatory `reason` on UNKNOWN — the runner emits the
+      four reasons it can determine alone (`timeout`, `tool_absent`,
+      `permission`, `probe_error`). `tainted` is M3's, `expired` is M10's, and
+      `unverifiable` is a property of the check rather than the run
+- [x] **Runner performs no interpretation.** It records raw stdout, stderr, exit code, duration. It does not evaluate `expect`.
+      — asserted by `TestEvidenceContainsNoVerdict`, which fails if a
+      verdict-shaped key ever appears in a record
+- [x] Mutation denylist with `mutating: false` override
 
 **Exit:** three hand-written checks produce a valid `evidence.json`. A deliberately mutating probe is refused. A deliberately hanging probe times out and records UNKNOWN(timeout).
+
+**Met.** Demonstrated end-to-end through `./scripts/sweep.sh`: the mutating
+probe is refused in 0ms with the matched token named, and the hanging probe
+returns at its `timeout_s` rather than its `sleep`. 32 Go tests, `go vet` and
+`gofmt` clean, wired into `./tests/run.sh` alongside the shell suite.
+
+Note for M2: the runner exits 0 or 3 only. It never exits 1 or 2, because
+those are verdicts and it has not made one. The exit codes in ARCHITECTURE §11
+belong to the process that decides.
 
 ---
 

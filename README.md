@@ -123,8 +123,13 @@ Everything before that is preflight — cheap checks that *explain* a failure an
 
 ```sh
 ./bootstrap/run.sh      # 1. measure this machine — works now
-./scripts/sweep.sh      # 2. check this repo      — stub until M1
+./scripts/sweep.sh      # 2. capture evidence     — works now
 ```
+
+The sweep currently captures; it does not yet decide. It writes
+`.ferret/evidence.json` and stops, because the verdict engine is M2 and the
+glance is M4. `./scripts/sweep.sh -validate` checks the manifest without
+running a single probe.
 
 Stage zero first, always; everything after reads what it measured.
 Quick list: `HOW-simple.md`. Full detail: `HOW.md`.
