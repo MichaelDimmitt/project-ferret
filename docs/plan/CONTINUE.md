@@ -14,9 +14,10 @@ picks up mid-build. Read both.
 ## The prompt
 
 ```
-You are continuing Ferret Sniffer. M0-M6 are built, tested, and committed:
-the pipeline runs end to end, and it still checks nothing, because the
-manifest is empty. M7 is where that changes. Take it to the finish line.
+You are continuing Ferret Sniffer. M0-M6 are built, tested, and committed,
+and M7's Tier 1 has landed: the tool now runs 19 real checks and reports
+true findings. What remains of M7 is Layers 4 and 5, which need real repos.
+Take it to the finish line.
 
 FIRST, ORIENT — do this before proposing anything
 
@@ -55,22 +56,28 @@ WHERE THINGS STAND
     ferret/render.go      the glance -> stdout + .ferret/status.md
     ferret/redact.go      capture-time filtering (a backstop; see below)
     ferret/bootstrap.sh   the Tier-1 fallback, when there is no Go runtime
+    manifest/00-machine.json  layer 0 — clock, disk, inodes, arch, libc
+    manifest/02-network.json  layer 2 — proxy pairs, CA bundles, registry
+    manifest/03-shell.json    layer 3 — PATH dupes, shadowing, fresh shell
+    manifest/06-git.json      layer 6 — repo state, mid-op, shallow, safe.dir
+      19 checks. Run on a real machine and confirmed by hand.
     tests/run.sh          shell suite + shellcheck + go vet/test/gofmt
-      83 Go test functions plus 3 shell test files. All green.
+      84 Go test functions plus 3 shell test files. All green.
 
-  THE GAP THAT MATTERS: manifest/ holds _schema.json and a README, and
-  no checks at all. `./scripts/sweep.sh` runs the whole pipeline and
-  reports on nothing. Everything above is machinery waiting for M7 to
-  give it work. This is your milestone.
+  THE TOOL NOW WORKS. `./scripts/sweep.sh` reports real findings. On the
+  machine it was built on it found three node installs, node missing from
+  a clean environment, 10 duplicate PATH entries, and a dirty tree — each
+  verified by hand before being believed.
 
   Toolchain: mise is installed and provides the pinned Go 1.23. If `go`
   is missing, `mise install` restores it — it is already approved, so
   this is not a new install decision.
 
   NOT done — this is your work:
-    M7  the checks that matter            <- START HERE. The milestone
-                                             that creates user value;
-                                             nothing before it does
+    M7  Layers 4 and 5                    <- START HERE. Tier 1 is done;
+                                             these are runtime-vs-pin and
+                                             package manager, and they NEED
+                                             REAL REPOS. See below.
     M8  remaining layers
     M9  forge
     M10 document emission
@@ -84,32 +91,64 @@ WHERE THINGS STAND
     The invariant it would protect is already asserted by
     tests/bootstrap-fallback-test.sh; the container itself was never run.
 
-HOW TO APPROACH M7 — the recommendation from the session that finished M6
+FINISHING M7 — Layers 4 and 5
 
-  Do Tier 1 FIRST, alone, and stop before Layers 4 and 5.
+  Tier 1 is committed (7adb091). What is left is where the false
+  positives actually live, because these checks depend on REPO SHAPE
+  rather than on the machine:
 
-  Tier 1 is the taint sources: clock, disk, inodes, arch, libc, PATH
-  shadowing, proxy vars and CA bundle, git repo state. Two reasons it
-  is the right first slice:
+    Layer 4 — runtime vs pin
+      .nvmrc / .node-version / engines / packageManager / .tool-versions
+      versus the version actually resolved. Version manager conflicts
+      (two installed at once). Native build chain presence.
+    Layer 5 — package manager
+      Lockfile count (>1 is a warning), lockfile vs PM version, .npmrc
+      registry and scopes and ignore-scripts WITHOUT opening auth lines,
+      registry reachability, node_modules vs lockfile agreement.
 
-    - These are the checks whose failure invalidates everything else,
-      so they exercise the taint machinery M2/M3 built and nothing has
-      stressed yet. If taint is wrong, find out against eight checks
-      rather than eighty.
-    - ferret/bootstrap.sh already implements all eight in shell. Porting
-      them to manifest JSON is a translation with a known-good reference,
-      and any disagreement between the two is a bug in one of them.
+  DO NOT WRITE THESE BLIND. PLAN.md's exit criterion is three real repos
+  of different shapes, and the user is the one who supplies them —
+  ideally including one whose pin is currently WRONG, since a repo where
+  everything is correct cannot demonstrate the difference between a true
+  finding and a false one. If they have not been supplied, ask before
+  writing Layer 4/5 checks rather than inventing fixtures: a check that
+  has only ever seen a synthetic repo is how a false positive ships.
 
-  Layers 4 and 5 — runtime-vs-pin, package manager — are where false
-  positives actually live, because they depend on repo shape. Do not
-  write them until Tier 1 has been run against real repos.
+  Layer 5's .npmrc checks are the sharpest secret-handling case in the
+  project: `grep -c '_authToken'` for presence, `grep -o '^registry='`
+  for the named non-secret line, and NEVER a match that includes a
+  value. One character separates the check from the leak. runner.go
+  refuses the leaking forms, and ferret/secrets_test.go pins it.
 
-  ON THE DUPLICATION, which is deliberate: bootstrap.sh and the manifest
-  will both implement these eight checks, in shell and in JSON. The
-  fallback is a floor for machines with no runtime. Keep the MANIFEST
-  authoritative and let the fallback stay deliberately dumber. Two
-  implementations of one rule drift; this one is accepted with its eyes
-  open, and it is why the fallback asserts only what is unambiguous.
+  THREE LESSONS FROM TIER 1, all found by reading output rather than by
+  testing, and all likely to recur in Layers 4 and 5:
+
+    1. PROBES ARE POSIX sh, AND sh IS NOT BASH. `command -v -a` is a
+       bashism; macOS /bin/sh rejects it, the error goes to stderr, and
+       a `| wc -l` then counts zero. The check reported "no node
+       installs" on a machine with three, rendered as a confident pass.
+       Run anything clever against /bin/sh before committing it.
+    2. TAINT MEANS "THIS ANSWER CANNOT BE TRUSTED", not "something
+       related also failed". Over-tainting converted the two most useful
+       findings on the machine into UNKNOWNs buried under a GO verdict.
+       The test: does the prerequisite's failure make the dependent's
+       MEASUREMENT wrong? Clock skew taints registry reachability (skew
+       breaks TLS, so the registry looks unreachable when it is fine).
+       Duplicate PATH entries do NOT taint a de-duplicated count.
+       Recorded in manifest/README.md.
+    3. READ THE CAPTURED EVIDENCE, NOT THE RENDERED VERDICT. Both of the
+       above looked fine in the glance. Dump evidence.json and check
+       every value against what you independently know to be true —
+       `applies=false` on a check that should have run, or a suspiciously
+       round `0`, is where the bugs were.
+
+  ON THE DUPLICATION, which is deliberate: ferret/bootstrap.sh and the
+  manifest both implement the Tier-1 area, in shell and in JSON. The
+  fallback is a floor for machines with no runtime. The MANIFEST is
+  authoritative; the fallback stays deliberately dumber. This already
+  paid off — the two implementations were cross-checked and agree on
+  every overlapping value, which is independent confirmation no single
+  implementation could give.
 
 WHAT CHANGED SINCE THE PLAN WAS WRITTEN — read PLAN.md's inline notes
 
@@ -132,13 +171,23 @@ WHAT CHANGED SINCE THE PLAN WAS WRITTEN — read PLAN.md's inline notes
     one. Follow that pattern; do not add plausible-looking fakes.
   - The glance has a NOTED section that is not in the plan. Non-decisive
     checks that FAILED were being swallowed by the "n passed" count.
-  - `isolate` is a new manifest field (MANIFEST_SCHEMA.md §3), added in
-    M5. Opt-in `env -i`. Use it for checks whose answer must hold in a
-    fresh shell — tool presence, version resolution, PATH shadowing —
-    which means several M7 Tier-1 checks want it.
+  - `isolate` is a manifest field (MANIFEST_SCHEMA.md §3), added in M5.
+    Opt-in `env -i`, for checks whose answer must hold in a fresh shell.
+    THE GATE IS NEVER ISOLATED: `applies_if` runs in the real
+    environment, `probe` and `declared` run cleared. Isolating the gate
+    made the fresh-shell check self-cancelling — it failed in the clean
+    env, resolved N/A, and silently skipped the exact problem it was
+    written to detect. Pinned by TestGateIsNeverIsolated.
   - M6 shipped deliberately thin. All eight Tier-1 areas exist in the
     fallback, but only with assertions whose answer is unambiguous,
-    precisely so M7 can decide what they really assert.
+    precisely so M7 could decide what they really assert.
+  - Submodules and LFS were deferred from M7 Tier 1 to M8, rather than
+    written blind. Both need a repo that HAS them to test against, and
+    an untested check is how a false positive ships. If you get such a
+    repo, they belong in manifest/06-git.json.
+  - Layer files are numbered by FRAMEWORK.md's layers, and gaps are
+    expected: 00, 02, 03, 06 exist because those are the Tier-1 layers.
+    01, 04, 05 and the rest arrive with their milestone.
 
 HOW TO WORK
 
@@ -222,9 +271,12 @@ WHAT GOOD LOOKS LIKE
   than partially. Once M10 lands, a false positive gets written into a
   document and outlives the run that produced it.
 
-  M7 IS WHERE THIS BECOMES USEFUL. Everything committed so far is
-  machinery. Precision over coverage: every reported NO-GO must be real,
-  and every false positive is a bug, not a rough edge.
+  M7 IS WHERE THIS BECOMES USEFUL, and Tier 1 proved it: the tool found
+  three node installs and a node that vanishes in a clean shell, on a
+  machine whose owner did not know either. Layers 4 and 5 are where it
+  gets harder, because they judge a repo rather than a box. Precision
+  over coverage: every reported NO-GO must be real, and every false
+  positive is a bug, not a rough edge.
 
 START
 
@@ -241,14 +293,17 @@ than tested, and they were fixed. The remaining open questions on it are
 listed at the end of that session — placeholder sections, one glyph for both
 warnings and blockers, and a passed-count that names nothing.
 
-**The next intervention point is M7, and it is the important one — it is
-yours, and it needs you.** The plan says run against three real repos of
-different shapes. Pick repos *you know well enough to spot a wrong answer*,
-because a plausible-looking wrong answer is the failure mode that matters and
-the only person who can catch it is someone who knows what the right answer
-was. Tier 1 can be built and checked without them, since those checks are
-about the machine rather than the project. Layers 4 and 5 are where the repos
-become necessary.
+**M7's intervention point is half done, and the half that remains is yours.**
+Tier 1 was built and checked without repos, because those checks are about the
+machine — and reading its output caught three defects that no test would have
+(a bashism producing a confident false answer, `isolate` silently cancelling a
+check, and over-tainting burying the two best findings under a GO verdict).
+
+Layers 4 and 5 are where the repos become necessary, and they cannot be
+honestly built without them. Pick three of different shapes that you know well
+enough to spot a wrong answer, and **include one whose pin is currently
+wrong** — a repo where everything is correct cannot demonstrate the difference
+between a true finding and a false one.
 
 The question to ask of the output is not "did it crash" but "is anything it
 says wrong" — in both directions. A NO-GO that is not real is a bug; so is a
@@ -262,18 +317,30 @@ GO on something genuinely broken.
 | Manifest schema has no fields for preferred tool / fallbacks / install gating | M10.5 |
 | Verdict-time cycle detection | M3's remainder |
 | Container run with no Go toolchain | M6's remainder |
-| Tier-1 checks exist in shell but not in the manifest | M7, deliberately |
+| Layers 4 and 5 — runtime-vs-pin, package manager | M7's remainder; needs real repos |
+| Submodules and LFS git checks | M8; deferred rather than written blind |
 
-**Two traps this project has already fallen into.** Both produced a confident
-"verified" that was not:
+**Three traps this project has already fallen into.** Each produced a
+confident "verified" or a confident wrong answer:
 
 - `cmd | tail` reports *tail's* exit code. Redirect to a file instead.
 - `./tests/run.sh` in a fresh clone silently skips every Go test — `mise which
   go` fails on an untrusted `mise.toml` — and still exits 0. Check the output
   says "vet and test clean", not "no toolchain — skipped".
+- **A green glance is not a correct glance.** Two Tier-1 checks rendered as
+  passing while measuring nothing: a bashism sent the real output to stderr and
+  `wc -l` counted the empty result. Dump `evidence.json` and check the captured
+  values against what you independently know, especially `applies=false` on a
+  check that should have run.
+
+**And one about the tool's own findings:** it reports a dirty working tree,
+which will usually be *your own uncommitted work* mid-session. That is a true
+finding, not a bug — but when testing, write outputs outside the repo being
+measured, or the check fires on your own artefacts and looks like a false
+positive.
 
 **Where to push back.** If a milestone's exit criteria turn out to be wrong
 once there is real code, the plan should change — a stale plan is worse than no
 plan. That is explicitly allowed, and it is better than quietly building
-something that does not match. This document has itself been rewritten twice
-for exactly that reason.
+something that does not match. This document has itself been rewritten three
+times for exactly that reason.
