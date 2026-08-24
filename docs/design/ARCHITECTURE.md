@@ -36,12 +36,13 @@ Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `
 | File | Role | Audience | Churn |
 |---|---|---|---|
 | `README.md` | What and why, in 60 seconds | Anyone | Low |
-| `docs/FRAMEWORK.md` | The evaluation theory — layers, ambient/declared, capture tiers, why first passes fail | Humans reasoning about coverage | Low |
-| `docs/ARCHITECTURE.md` | This file. How it's built and why | Contributors | Medium |
-| `docs/PLAN.md` | Milestones in dependency order | Whoever is building | High until done |
-| `docs/PROMPT.md` | Standing instruction to Claude Code | Claude Code | Low |
-| `docs/MANIFEST_SCHEMA.md` | Field-by-field spec for a check | Anyone adding checks | Low |
-| `docs/DOCS_MODEL.md` | The three runtime documents, volatility classes, provenance, the baseline rule | Contributors | Low |
+| `docs/design/FRAMEWORK.md` | The evaluation theory — layers, ambient/declared, capture tiers, why first passes fail | Humans reasoning about coverage | Low |
+| `docs/design/ARCHITECTURE.md` | This file. How it's built and why | Contributors | Medium |
+| `docs/plan/PLAN.md` | Milestones in dependency order | Whoever is building | High until done |
+| `docs/plan/PROMPT.md` | Standing instruction to Claude Code | Claude Code | Low |
+| `docs/design/MANIFEST_SCHEMA.md` | Field-by-field spec for a check | Anyone adding checks | Low |
+| `docs/design/BOOTSTRAP_PIPELINE.md` | The pre-runner five: script-measured machine state, preferred stack, do-not-use policy | Contributors | Medium |
+| `docs/design/DOCS_MODEL.md` | The three runtime documents, volatility classes, provenance, the baseline rule | Contributors | Low |
 | `AGENTS.md` | Agent-facing repo conventions; `CLAUDE.md` is a thin pointer to it | Any coding agent | Low |
 
 **`FRAMEWORK.md` is rationale; `manifest/` is contract.** The framework explains *why* clock skew matters. The manifest states *how* to probe it and *what* counts as passing. Prose does not drive execution — if a check isn't in the manifest, it doesn't run, no matter how well the framework argues for it.
@@ -65,7 +66,7 @@ Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `
 | `<repo>/.ferret/evidence.json` | Raw probe results | No |
 | `<repo>/.ferret/raw/` | Untruncated probe stdout, for debugging Ferret itself | No |
 
-`.ferret/` is gitignored on creation, in the same commit that creates it — with an explicit un-ignore for `requirements.md`, which is the one artifact meant to travel. See `docs/DOCS_MODEL.md`.
+`.ferret/` is gitignored on creation, in the same commit that creates it — with an explicit un-ignore for `requirements.md`, which is the one artifact meant to travel. See `docs/design/DOCS_MODEL.md`.
 
 ---
 
@@ -88,7 +89,7 @@ A partial answer that announces its partiality is the correct behavior. A partia
 
 ## 4. The check record
 
-Full field spec in `docs/MANIFEST_SCHEMA.md`. Shape:
+Full field spec in `docs/design/MANIFEST_SCHEMA.md`. Shape:
 
 ```json
 {
@@ -240,7 +241,7 @@ Enforced as follows:
 - **The baseline is written before any mutation.** If it can't be written, Ferret exits 3 rather than proceed. This preserves the ability to answer *"was this broken before I got here?"* — which is the entire value of a diagnostic tool.
 - **Phase 3 (remediate) is opt-in** (`--remediate`), logged, and every change tagged `ferret-installed` with method and timestamp.
 - **Failed remediation is never fatal.** No sudo, no egress, TLS interception, immutable FS, broken package manager — each is itself a high-priority finding. Ferret records the failure, notes which checks now run in reduced mode, and emits the diagnosis it already collected. The machines where remediation fails are the machines that need the report most.
-- **Provenance is mandatory.** Untagged, Ferret reports its own footprint as a finding — the false positive that gets a tool ignored. See `docs/DOCS_MODEL.md` §4.
+- **Provenance is mandatory.** Untagged, Ferret reports its own footprint as a finding — the false positive that gets a tool ignored. See `docs/design/DOCS_MODEL.md` §4.
 
 `--footprint` lists what Ferret installed; `--revert` undoes it.
 

@@ -11,10 +11,10 @@ You are building Ferret Sniffer, a status-check tool for the machine it runs on.
 
 Read these before writing code:
   README.md               — what the tool is and what it refuses to do
-  docs/ARCHITECTURE.md    — design decisions and their reasons
-  docs/DOCS_MODEL.md      — the three documents, volatility, provenance, baseline rule
-  docs/PLAN.md            — milestones in dependency order
-  docs/FRAMEWORK.md       — the evaluation theory the checks derive from
+  docs/design/ARCHITECTURE.md    — design decisions and their reasons
+  docs/design/DOCS_MODEL.md      — the three documents, volatility, provenance, baseline rule
+  docs/plan/PLAN.md            — milestones in dependency order
+  docs/design/FRAMEWORK.md       — the evaluation theory the checks derive from
 
 FRAMEWORK.md is rationale, not a spec. It explains why a check matters.
 The manifest states how to probe and what passes. Never execute from prose.
@@ -92,7 +92,7 @@ State the current milestone. Then begin.
 
 **Where to intervene:**
 
-- **After M1**, read `docs/MANIFEST_SCHEMA.md` yourself. It's the contract; every later milestone is expensive to change against a wrong schema.
+- **After M1**, read `docs/design/MANIFEST_SCHEMA.md` yourself. It's the contract; every later milestone is expensive to change against a wrong schema.
 - **After M4**, run it on your own machine and actually read the output. If it doesn't tell you something true in ten seconds, the format is wrong and now is the cheap time to say so.
 - **During M7**, every false positive is a bug report. Precision over coverage.
 

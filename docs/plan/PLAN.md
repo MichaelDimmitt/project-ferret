@@ -13,7 +13,7 @@ Repo structure, gitignore, agent conventions.
 - [ ] `ferret/`, `manifest/`, `docs/`, `tests/fixtures/`
 - [ ] `.gitignore` containing `.ferret/` — **in this commit, before any code can create it**
 - [ ] `AGENTS.md` with repo conventions; `CLAUDE.md` as a one-line pointer to it
-- [ ] `docs/FRAMEWORK.md` copied in (source of coverage truth, not executed)
+- [ ] `docs/design/FRAMEWORK.md` copied in (source of coverage truth, not executed)
 - [ ] `scripts/sweep.sh` stub that shells to `python3 -m ferret`
 
 **Exit:** `./scripts/sweep.sh` runs and prints "not implemented" without traceback.
@@ -24,7 +24,7 @@ Repo structure, gitignore, agent conventions.
 
 The contract. Get this right and everything after is mechanical.
 
-- [ ] `docs/MANIFEST_SCHEMA.md` — every field, every `expect` type, worked examples
+- [ ] `docs/design/MANIFEST_SCHEMA.md` — every field, every `expect` type, worked examples
 - [ ] JSON Schema at `manifest/_schema.json`; validation runs before any probe executes
 - [ ] `ferret/runner.py` — loads manifest, evaluates `applies_if`, runs `probe` and `declared`, enforces `timeout_s`, writes `evidence.json`
 - [ ] Four states with mandatory `reason` on UNKNOWN
