@@ -15,6 +15,7 @@ Read these before writing code:
   README.md                        — what the tool is and what it refuses to do
   docs/design/ARCHITECTURE.md      — design decisions and their reasons
   docs/design/BOOTSTRAP_PIPELINE.md — stage zero: measure the machine, then plan
+  docs/design/LANGUAGE_CHOICE.md   — why Go, what mise changes, when to revisit
   docs/design/DOCS_MODEL.md        — the three documents, volatility, provenance, baseline rule
   docs/plan/PLAN.md                — milestones in dependency order
   docs/design/FRAMEWORK.md         — the evaluation theory the checks derive from
@@ -37,9 +38,25 @@ WORKING AGREEMENT
 
 INVARIANTS — violating any of these is a failed milestone, not a tradeoff
 
-  - No dependencies outside the Python 3.8+ standard library. Not one.
+  - The runner is Go, standard library only. No third-party modules. Not one.
+    Go was chosen because its stdlib covers the whole workload — JSON,
+    subprocess with timeouts, regex — and because a static binary depends on
+    nothing at runtime. See docs/design/LANGUAGE_CHOICE.md.
+  - mise supplies the runtime, and is proposed for approval like any other
+    tool. Never install it silently to satisfy Ferret's own needs. If it is
+    declined or cannot install, that is a finding: fall back to the Tier-1
+    shell checks and report UNKNOWN, never GO.
+  - Stage zero is not written in the runtime it measures. Everything before
+    mise is a shell script — POSIX sh, no interpreter that might be missing.
+    The runner starts only after the toolchain is confirmed present.
+  - The preliminary script is per-OS, because the probes are. Each OS gets its
+    own script under `scripts/os/` — `darwin.sh`, `linux.sh`, and so on —
+    with the shared POSIX core factored out. `bootstrap/run.sh` detects the OS
+    with `uname -s` and dispatches. A machine whose OS has no script is a
+    finding (UNKNOWN, with the detected uname recorded), never a crash and
+    never a guess at the closest match.
   - The runner never interprets. It records raw stdout, stderr, exit code,
-    duration. If runner.py imports from verdict.py, the design is broken.
+    duration. If the runner imports the verdict package, the design is broken.
   - No code path converts UNKNOWN into GO. Assert this in a test.
   - Nothing mutates in phase 1 (observe): no install, fetch, pull, clone,
     config write, or service start. Enforced by denylist AND by a test
@@ -105,6 +122,7 @@ State the current milestone. Then begin.
 
 **Where to intervene:**
 
+- **At M0**, run `./bootstrap/run.sh` on a machine that is *not* yours and read the results table. Stage zero is shell for a reason; the fastest way to find a bashism or a GNU-only flag that snuck in is a box that isn't the one it was written on.
 - **After M1**, read `docs/design/MANIFEST_SCHEMA.md` yourself. It's the contract; every later milestone is expensive to change against a wrong schema.
 - **After M4**, run it on your own machine and actually read the output. If it doesn't tell you something true in ten seconds, the format is wrong and now is the cheap time to say so.
 - **During M7**, every false positive is a bug report. Precision over coverage.

@@ -1,0 +1,20 @@
+# mise.toml — the toolchain Ferret builds with.
+#
+# Pinned so the build is reproducible: the same source produces the same
+# binary on any machine, rather than whatever Go happens to be installed.
+#
+# mise is proposed for approval like any other tool — Ferret never installs it
+# silently to satisfy its own needs. If it is declined, stage zero
+# (./bootstrap/run.sh) still runs, and the sweep falls back to the Tier-1
+# shell checks with an UNKNOWN verdict.
+#
+# See docs/design/LANGUAGE_CHOICE.md.
+
+[tools]
+go = "1.23"
+
+[env]
+# Keep the build hermetic: stdlib only, no module downloads. If this ever
+# fails, something has introduced a third-party dependency — which is a
+# design violation, not a build problem to work around.
+GOFLAGS = "-mod=readonly"

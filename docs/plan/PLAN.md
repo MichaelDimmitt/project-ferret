@@ -10,17 +10,32 @@ Milestones in dependency order. Each is independently verifiable — you can run
 
 Repo structure, gitignore, agent conventions.
 
-- [ ] `ferret/`, `manifest/`, `tests/fixtures/`
+- [x] `ferret/`, `manifest/`, `tests/fixtures/`
 - [x] `bootstrap/`, `scripts/`, `docs/design/`, `docs/plan/` — runnable code apart from prose, design docs apart from build plans
 - [x] `.gitignore` containing `.ferret/` — **in this commit, before any code can create it**
 - [x] `AGENTS.md` with repo conventions; `CLAUDE.md` as a one-line pointer to it
 - [x] `docs/design/FRAMEWORK.md` copied in (source of coverage truth, not executed)
-- [ ] `scripts/sweep.sh` stub that shells to `python3 -m ferret`
+- [x] `scripts/os/common.sh` + `scripts/os/{darwin,linux}.sh`; `default-script.sh.example` dispatches on `uname -s`
+- [x] `scripts/sweep.sh` stub that resolves and runs the Go binary — locates a
+      runner rather than assuming one; exits **3**, not 0, because an
+      unimplemented sweep has verified nothing and 0 means GO
+- [x] `mise.toml` pinning the Go version, so the build is reproducible
 
-Note: `bootstrap/run.sh` (stage zero, POSIX sh) and `scripts/sweep.sh` (Python
+Note: `bootstrap/run.sh` (stage zero, POSIX sh) and `scripts/sweep.sh` (runner
 entry) are two different entry points and both are expected.
 
-**Exit:** `./scripts/sweep.sh` runs and prints "not implemented" without traceback.
+Stage zero is shell and stays shell. It runs before mise exists, so it cannot
+be written in a runtime it is measuring.
+The probes are per-OS because the probes genuinely differ (`/proc` is Linux,
+`sw_vers` and SIP are macOS, `getent` is glibc); a single script covering every
+OS is wrong everywhere instead of right somewhere. An unrecognized `uname -s`
+records `os-support: unknown (<uname>)`, runs the common core alone, and never
+guesses at the nearest match.
+
+**Exit:** `./bootstrap/run.sh` writes a well-formed `default-results.md` on
+macOS and Linux, runs unchanged under `dash`, and degrades to the common core
+on an unknown OS. `./scripts/sweep.sh` runs and prints "not implemented"
+without traceback.
 
 ---
 
@@ -28,9 +43,19 @@ entry) are two different entry points and both are expected.
 
 The contract. Get this right and everything after is mechanical.
 
+**Language: Go, stdlib only** — settled, see `docs/design/LANGUAGE_CHOICE.md`.
+mise supplies the toolchain after the user approves it; `mise.toml` pins the
+version. Rust is documented there as the live alternative, with the crate set
+it would need, in case the four-state invariant proves hard to hold by
+discipline alone.
+
+`evidence.json` is the contract, not the language. A rewrite that emits the
+same file leaves M2 onward untouched — which is why this milestone spends its
+effort on the schema.
+
 - [ ] `docs/design/MANIFEST_SCHEMA.md` — every field, every `expect` type, worked examples
 - [ ] JSON Schema at `manifest/_schema.json`; validation runs before any probe executes
-- [ ] `ferret/runner.py` — loads manifest, evaluates `applies_if`, runs `probe` and `declared`, enforces `timeout_s`, writes `evidence.json`
+- [ ] `ferret/runner.go` — loads manifest, evaluates `applies_if`, runs `probe` and `declared`, enforces `timeout_s`, writes `evidence.json`
 - [ ] Four states with mandatory `reason` on UNKNOWN
 - [ ] **Runner performs no interpretation.** It records raw stdout, stderr, exit code, duration. It does not evaluate `expect`.
 - [ ] Mutation denylist with `mutating: false` override
@@ -41,12 +66,12 @@ The contract. Get this right and everything after is mechanical.
 
 ## M2 — Verdict engine
 
-- [ ] `ferret/verdict.py` — applies `expect` to evidence, emits GO / NO-GO / UNKNOWN / N/A
+- [ ] `ferret/verdict.go` — applies `expect` to evidence, emits GO / NO-GO / UNKNOWN / N/A
 - [ ] Predicates: `equals`, `matches`, `one_of`, `non_empty`, `absent`, `numeric_lt`, `numeric_gt`, `semver_satisfies`, `exit_code`
 - [ ] Reads `evidence.json` as its **only** input — never re-probes
 - [ ] Test asserting **no code path turns UNKNOWN into GO**
 
-**Exit:** `verdict.py` runs standalone against a committed fixture `evidence.json` and produces stable output. Editing an `expect` and re-running changes the verdict without touching the machine.
+**Exit:** `verdict.go` runs standalone against a committed fixture `evidence.json` and produces stable output. Editing an `expect` and re-running changes the verdict without touching the machine.
 
 ---
 
@@ -65,7 +90,7 @@ The contract. Get this right and everything after is mechanical.
 
 The product. Everything before this is plumbing.
 
-- [ ] `ferret/render.py` → `status.md` + stdout
+- [ ] `ferret/render.go` → `status.md` + stdout
 - [ ] Ordered by **severity, not by layer**
 - [ ] Sections: VERDICT / BLOCKERS / UNKNOWN / WARNINGS / golden-path line
 - [ ] Every NO-GO carries its `remedy`
@@ -83,6 +108,13 @@ The product. Everything before this is plumbing.
 Do this before the manifest grows, because both get harder to retrofit with volume.
 
 - [ ] Allowlist redaction at capture time in the runner
+- [x] *(landed early, at stage zero)* Redaction in `cell()` for
+      `default-results.md`, at two levels — `--redact` (identity) and
+      `--redact=paranoid` (adds fingerprint and posture); asserted by
+      `tests/redaction-test.sh`. Stage zero produces machine-identifying data
+      before the runner exists, so the guarantee had to start there. Two
+      levels because leaking *who you are* and leaking *what the machine is*
+      are different threats with different audiences.
 - [ ] Presence-and-shape recording: `GH_TOKEN: <set, 40 chars, ghp_…>`
 - [ ] Stable salted hashing for credential-shaped values
 - [ ] Secret fixtures (fake `GH_TOKEN`, `.npmrc` `_authToken`, remote with embedded creds) asserted absent from both outputs
@@ -97,10 +129,10 @@ Do this before the manifest grows, because both get harder to retrofit with volu
 
 - [ ] `ferret/bootstrap.sh`, POSIX sh, Tier-1 checks only
 - [ ] Emits partial `status.md`, verdict **UNKNOWN**, never GO
-- [ ] Header states plainly: `python3 absent — N of M checks not run`
+- [ ] Header states plainly: `runner unavailable — N of M checks not run`
 - [ ] `scripts/sweep.sh` detects and delegates
 
-**Exit:** works in a container with Python removed. Verdict is UNKNOWN, and the reason is the first thing on screen.
+**Exit:** works in a container with no Go toolchain and mise declined. Verdict is UNKNOWN, and the reason is the first thing on screen.
 
 ---
 
@@ -251,7 +283,7 @@ The real verdict. Everything before it is preflight that explains a failure.
 - **Growing the manifest before M4 is read by a human.** The format is the product; validate it on yourself early.
 - **Any UNKNOWN rendering green.** Assert it in tests, not in review.
 - **False positives.** One wolf-cry and the tool gets ignored. Precision beats coverage — and once M10 lands, a false positive gets written into a document and outlives the run.
-- **Interpretation creeping into the runner.** If `runner.py` imports anything from `verdict.py`, the separation is gone.
+- **Interpretation creeping into the runner.** If `runner.go` imports anything from `verdict.go`, the separation is gone.
 - **Remedies going stale.** A wrong remedy is worse than none.
 - **Remediating before baselining.** Destroys the ability to answer "was this broken before I got here?" — which is the whole value of the tool.
 - **Ferret reporting its own footprint as a finding.** Provenance tags exist to prevent this; untagged facts make the tool untrustworthy about itself.

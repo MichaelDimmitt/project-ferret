@@ -4,7 +4,7 @@
 
 Three stages, strictly ordered. The ordering is the design.
 
-Stage zero comes before all of it: `bootstrap/run.sh` measures the machine with POSIX sh, no Python and no agent, because everything below assumes tools that may not be there. See `docs/design/BOOTSTRAP_PIPELINE.md`.
+Stage zero comes before all of it: `bootstrap/run.sh` measures the machine with POSIX sh, no toolchain and no agent, because everything below assumes tools that may not be there. See `docs/design/BOOTSTRAP_PIPELINE.md`.
 
 ```
   bootstrap/run.sh         stage zero — sh only, no AI, writes default-results.md
@@ -13,16 +13,16 @@ Stage zero comes before all of it: `bootstrap/run.sh` measures the machine with 
   manifest/*.json          declarative checks — data, not code
          │
          ▼
-  ferret/runner.py         executes probes, NO interpretation
+  ferret/runner.go         executes probes, NO interpretation
          │
          ▼
   evidence.json            raw results + metadata, one record per check
          │
          ▼
-  ferret/verdict.py        applies expectations, propagates taint
+  ferret/verdict.go        applies expectations, propagates taint
          │
          ▼
-  ferret/render.py         severity-ordered glance
+  ferret/render.go         severity-ordered glance
          │
          ▼
   status.md  +  stdout
@@ -30,7 +30,7 @@ Stage zero comes before all of it: `bootstrap/run.sh` measures the machine with 
 
 **Why capture and interpretation are separate processes, not separate functions:** it makes the "no interpreting while collecting" rule structural rather than aspirational. The runner physically cannot skip a check because an earlier one failed — it doesn't know what failure means. That property is the whole reason the tool works, so it gets enforced by the architecture rather than by discipline.
 
-Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `verdict.py` against yesterday's evidence, no re-probing.
+Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `verdict.go` against yesterday's evidence, no re-probing.
 
 ---
 
@@ -57,8 +57,9 @@ Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `
 | Path | Role |
 |---|---|
 | `manifest/00-machine.json` … `manifest/10-process.json` | Checks, one file per layer |
-| `ferret/*.py` | Runner, verdict engine, renderer, redactor |
-| `ferret/bootstrap.sh` | Tier-1-only fallback when Python is unavailable |
+| `ferret/*.go` | Runner, verdict engine, renderer, redactor |
+| `ferret/bootstrap.sh` | Tier-1-only fallback when the runner is unavailable |
+| `mise.toml`, `go.mod` | Pinned toolchain and module definition |
 | `scripts/sweep.sh` | Thin entry point |
 
 ### Generated at runtime
@@ -75,20 +76,34 @@ Consequence: `evidence.json` is re-renderable. Change a pass condition, re-run `
 
 ---
 
-## 3. Why the runner is Python, and the honest problem with that
+## 3. Why the runner is Go, and where the runtime comes from
 
-The runner cannot depend on what it measures. That eliminates Node immediately — checking whether Node is correctly installed using Node is circular.
+> Full evaluation — Go, Rust, Elixir, Python, Node, sh — with the recommended
+> Rust crate set and the conditions that would reopen this, in
+> `docs/design/LANGUAGE_CHOICE.md`.
 
-Python 3 (stdlib only, ≥3.8) is the least-bad choice: present on essentially every Linux and macOS, no install step, no third-party packages.
+**mise supplies the runtime.** Stage zero measures the machine in POSIX sh, mise is the first thing the proposal asks for, and once approved it provides the Go toolchain. So the question is not "what is already installed everywhere" but "what is the best language for this program." `mise.toml` pins the version so the build is reproducible.
 
-**But it is still a dependency, and pretending otherwise would be exactly the false-green failure this tool exists to prevent.** A Windows machine without Python, or a minimal Alpine container, has none. So:
+The runner cannot depend on what it measures. That eliminates Node immediately — checking whether Node is correctly installed using Node is circular. One environment variable makes the point:
+
+```
+$ export NODE_OPTIONS="--require /tmp/deleted.js"
+$ node --version
+Error: Cannot find module '/tmp/deleted.js'
+```
+
+Node is healthy; every Node process on the machine is not. A Node-based Ferret dies with that error instead of reporting it.
+
+**Go, stdlib only.** `encoding/json` unmarshals the manifest into typed structs, so the schema is checked by the compiler. `exec.CommandContext` gives the hard per-probe timeout M1 requires. `regexp`, `path/filepath`, and `os` cover the rest. Nothing third-party, and the build output is a static binary that depends on nothing at runtime.
+
+**mise can be declined, and that must still produce an answer.** So:
 
 - `ferret/bootstrap.sh` is POSIX sh and runs the **Tier-1 checks only** — clock, disk, inodes, arch, libc, PATH, CA, git state. These are the checks that invalidate everything else, and they're all cheap shell.
-- If Python is absent, bootstrap emits a partial `status.md` whose verdict is **UNKNOWN**, never GO, with `python3 absent — 60 of 68 checks not run` stated at the top.
+- When the runner is unavailable, bootstrap emits a partial `status.md` whose verdict is **UNKNOWN**, never GO, with `runner unavailable — 60 of 68 checks not run` stated at the top.
 
 A partial answer that announces its partiality is the correct behavior. A partial answer that looks complete is the failure mode.
 
-**Manifest format: JSON, not YAML.** YAML would need PyYAML, which is not stdlib. JSON is verbose and has no comments — a real cost when authoring shell one-liners — but the alternative is a dependency in the one tool that must not have dependencies. Long shell commands use string arrays joined with `\n` to stay readable. If this becomes intolerable, the escape is a YAML→JSON build step where YAML is the source and JSON is committed alongside it, so the runtime path stays dependency-free.
+**Manifest format: JSON, not YAML.** YAML would need a third-party module; `encoding/json` is stdlib. JSON is verbose and has no comments — a real cost when authoring shell one-liners — but the alternative is a dependency in the one tool that must not have dependencies. Long shell commands use string arrays joined with `\n` to stay readable. If this becomes intolerable, the escape is a YAML→JSON build step where YAML is the source and JSON is committed alongside it, so the runtime path stays dependency-free.
 
 ---
 
@@ -116,7 +131,7 @@ Full field spec in `docs/design/MANIFEST_SCHEMA.md`. Shape:
 
 Field notes worth stating up front:
 
-- **`probe` and `declared` are separate fields**, because nearly every check in this tool is a declared-vs-actual comparison. Making that structural means the comparison logic is written once in `verdict.py` rather than re-implemented per check.
+- **`probe` and `declared` are separate fields**, because nearly every check in this tool is a declared-vs-actual comparison. Making that structural means the comparison logic is written once in `verdict.go` rather than re-implemented per check.
 - **`expect` is declarative** — `semver_satisfies`, `matches`, `one_of`, `non_empty`, `numeric_lt`, `equals`, `absent`. There is an `exit_code` escape hatch for the genuinely awkward cases, used sparingly. Declarative predicates keep the manifest data; shell everywhere would make it code, and code drifts.
 - **`tainted_by` points upward**, listing prerequisite check ids. Edges are declared on the dependent, not the prerequisite, so adding a check never requires editing an unrelated one.
 - **`severity`** ∈ `blocker` | `warning` | `info`. Drives ordering in the glance and the top-line verdict.
@@ -154,9 +169,9 @@ These map to the framework's T3a–d causes. The taxonomy stays as reason string
 
 ## 6. Taint
 
-`verdict.py` builds a DAG from `tainted_by`, topologically sorts it, and walks it. Any check whose prerequisite resolved NO-GO becomes `UNKNOWN(tainted)` — regardless of what its own probe returned.
+`verdict.go` builds a DAG from `tainted_by`, topologically sorts it, and walks it. Any check whose prerequisite resolved NO-GO becomes `UNKNOWN(tainted)` — regardless of what its own probe returned.
 
-The probe **still ran and its raw output is still in `evidence.json`.** Taint is an interpretation-layer judgment about trustworthiness, not a reason to skip collection. This is what lets you re-run `verdict.py` after fixing the clock without re-probing anything.
+The probe **still ran and its raw output is still in `evidence.json`.** Taint is an interpretation-layer judgment about trustworthiness, not a reason to skip collection. This is what lets you re-run `verdict.go` after fixing the clock without re-probing anything.
 
 The glance renders taint as a rollup on the *cause*, not as forty separate lines:
 
@@ -164,7 +179,7 @@ The glance renders taint as a rollup on the *cause*, not as forty separate lines
 ✗ Clock skew +11m42s          → taints 38 checks below
 ```
 
-Cycles are a manifest authoring error. `verdict.py` detects them and fails loudly rather than resolving them arbitrarily.
+Cycles are a manifest authoring error. `verdict.go` detects them and fails loudly rather than resolving them arbitrarily.
 
 ---
 

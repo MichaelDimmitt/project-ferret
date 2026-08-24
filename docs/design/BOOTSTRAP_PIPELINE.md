@@ -1,6 +1,6 @@
 # The Bootstrap Pipeline
 
-Five documents that get an AI from *nothing known about this machine* to *an approved plan it may execute*. They run before the Python runner, before the manifest, before anything that could itself be missing.
+Five documents that get an AI from *nothing known about this machine* to *an approved plan it may execute*. They run before the runner, before the manifest, before anything that could itself be missing.
 
 The ordering is the design, and the constraint that shapes all of it: **step 2 is a shell script, not an agent.** An AI cannot be trusted to report what is on a machine it hasn't measured, and it cannot measure a machine whose tools it hasn't confirmed exist. So the measuring is mechanical, and the AI reads the result.
 
@@ -36,16 +36,24 @@ Documents 4 and 5 are read *against* document 3. Preference meets reality meets 
 
 **What it is:** a POSIX sh script that runs every probe appropriate to the detected OS and writes `default-results.md`.
 
-**No AI runs this.** That is the point of it. It is a script so it can run on a box with no network, no agent, and no Python — and so its output is reproducible by a human who does not trust the agent.
+**No AI runs this.** That is the point of it. It is a script so it can run on a box with no network, no agent, and no toolchain — and so its output is reproducible by a human who does not trust the agent.
 
-**Where it lives:**
+**Shell, not the runner's language — and that is not a stylistic preference.** Stage zero exists to establish what is on the machine, and it runs *before mise*. A stage zero written in Go would need the toolchain that stage zero is there to find; on a fresh box that is simply circular. Until mise is proposed, approved, and installed, the only assumed dependencies are POSIX sh and coreutils. See `LANGUAGE_CHOICE.md`.
+
+**One script per OS.** The probes are environment-specific and pretending otherwise produces a script that is wrong everywhere rather than right somewhere. `/proc/1/cgroup` is Linux. `/opt/homebrew` and `sw_vers` are macOS. Package managers differ, `readlink -f` differs, `date` flags differ. So each OS owns its own script, and the parts that genuinely are portable live in a shared core both source.
 
 | Path | Committed | Role |
 |---|---|---|
-| `scripts/default-script.sh.example` | **Yes** | The reference implementation. What reviewers read and adaptation starts from. |
-| `bootstrap/run.sh` | **Yes** | Stage-zero entry point. Seeds the script from the example on first run, then executes it. |
+| `scripts/lib/redact.sh` | **Yes** | Redaction rules, standalone. Sourceable by any script, not just the probes. |
+| `scripts/os/common.sh` | **Yes** | Portable core — row emission, PATH walking, dedupe, the probes that are genuinely POSIX. Sourced, not run. |
+| `scripts/os/darwin.sh` | **Yes** | macOS probes. Sources `common.sh`. |
+| `scripts/os/linux.sh` | **Yes** | Linux probes. Sources `common.sh`. |
+| `scripts/default-script.sh.example` | **Yes** | The reference implementation and the dispatch shape. What reviewers read and adaptation starts from. |
+| `bootstrap/run.sh` | **Yes** | Stage-zero entry point. Detects the OS, seeds the script from the example on first run, then executes it. |
 | `bootstrap/default-script.sh` | No | The adapted copy for *this* machine. Yours to edit; never overwritten. |
 | `bootstrap/default-results.md` | No | The measurement. Describes one machine, never travels. |
+
+**An unrecognized OS is a finding.** `uname -s` returning something with no script under `scripts/os/` records `os-support: unknown` with the raw uname value and runs the common core alone. It does not guess at the nearest match — a Linux script run on a BSD produces confident wrong answers, which is the failure mode this whole tool exists to prevent.
 
 Run `./bootstrap/run.sh`, not the script in `scripts/` directly — the entry point owns the seeding and the output path. An agent asked what is installed reads `bootstrap/default-results.md`, or generates it by running that entry point; it does not answer from assumption and does not probe ad hoc. See `AGENTS.md`.
 
@@ -59,7 +67,7 @@ Run `./bootstrap/run.sh`, not the script in `scripts/` directly — the entry po
   - Is the filesystem immutable? Are we in a container? Is the clock right?
 - **What the environment looks like** — PATH, locale, encoding, architecture, libc.
 
-This maps onto the existing `ferret/bootstrap.sh` (ARCHITECTURE.md §3): Tier-1-only, POSIX sh, runs when Python is absent. The bootstrap pipeline is that script's contract, written down.
+This maps onto the existing `ferret/bootstrap.sh` (ARCHITECTURE.md §3): Tier-1-only, POSIX sh, runs when the runner is unavailable. The bootstrap pipeline is that script's contract, written down.
 
 ## 3. `default-results.md`
 
@@ -73,6 +81,63 @@ This maps onto the existing `ferret/bootstrap.sh` (ARCHITECTURE.md §3): Tier-1-
 `command to reproduce` is not decoration. It is what lets a human check a line that looks wrong, and what lets the next run diff honestly. A fact without provenance is a claim.
 
 **Optional columns** as they earn their place — `default` (yes/no), `path`, `kind`.
+
+**It is not shareable by default, and it says so.** The full results carry the
+username, home paths, exact OS build, hardware, and the whole PATH — an
+inventory of installed tooling that identifies the user and tells a reader
+which exploits would land. The header states this, because the moment of risk
+is someone pasting the file into an issue or a chat to ask for help, and that
+is exactly what a results file invites.
+
+**Two levels, because there are two threats and averaging them serves
+neither.** Leaking *who you are* and leaking *what this machine is* have
+different audiences and different costs, so they get different flags.
+
+| Level | Removes | For |
+|---|---|---|
+| `--redact` | Identity: username, home paths, repo path, TMPDIR, PATH contents, uid | An issue tracker, a colleague, an AI |
+| `--redact=paranoid` | Also fingerprint and posture: exact OS build, CPU, kernel revision, SIP/sudo state, locale, absolute clocks | Somewhere public and indexed |
+
+Both write a separate `default-results.redacted.md` and never overwrite the
+full copy — the unredacted one is what makes a finding actionable.
+
+**Tool versions survive both levels.** They are the file's reason to exist: a
+reader who cannot see that Docker is four years stale cannot help. What level 2
+removes is the *combination* that converts a help request into a targeting
+packet — exact OS build, plus hardware, plus which defenses are enabled. The
+OS version is coarsened (`26.5.2` → `26.x`) rather than dropped, because "is
+this too old for the toolchain" is still a question worth answering.
+
+Two rules that fall out of the tool's own premises:
+
+- **A stripped row still appears**, carrying `<redacted>`. A silently missing
+  row is indistinguishable from a probe that failed, and absence and unknown
+  must stay distinguishable — that principle applies to redaction too.
+- **Clock skew survives level 2**, as a computed `clock-skew` row. Skew is a
+  real finding that taints checks below it; only the absolute timestamps,
+  which place the user in a timezone, are removed.
+
+Redaction happens in `cell()`, the single function every value passes through
+on its way into the table. That placement is the point: redaction a probe
+author has to remember is redaction that eventually doesn't happen. This is
+the same allowlist-at-capture-time rule ARCHITECTURE.md sets for the Go
+runner, applied at stage zero — `tests/run.sh` asserts it holds, including a
+control that fails if redaction silently becomes a no-op.
+
+**The substitution logic is a standalone library**, `scripts/lib/redact.sh`,
+sourceable without the probe machinery so later scripts can apply the same
+rules. One definition of "redacted" means the shell and Go halves cannot
+drift into disagreeing about it — which matters at M5, when the runner needs
+the same substitutions. `tests/redact-lib-test.sh` fails if anything couples
+the library back to `common.sh`.
+
+It is a **value** filter, not a stream filter, and deliberately so. Passing a
+finished document through a substitution pass is a denylist: it removes the
+patterns someone enumerated and silently passes a credential in a stack trace.
+Filtering each value as it is captured is the allowlist. Level 2's extra
+stripping stays out of the library for the same reason it stays out of
+`cell()` — removing posture is a per-fact judgment, not a substitution, so it
+lives in `row_posture()` where the probe author can see it.
 
 **One line per install, never merged.** Two bashes are two rows:
 

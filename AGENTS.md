@@ -1,6 +1,7 @@
 # Repo conventions
 
 Start with `docs/plan/PROMPT.md`. It is the standing instruction for work in this repo.
+`HOW.md` says what to run and in what order.
 
 Reading order: `README.md` → `docs/design/ARCHITECTURE.md` → `docs/design/DOCS_MODEL.md` →
 `docs/plan/PLAN.md`. `docs/design/FRAMEWORK.md` is rationale for coverage decisions, not a
@@ -8,9 +9,19 @@ spec — never execute from it.
 
 ## Hard rules
 
-- Python 3.8+ standard library only. No third-party packages, ever.
-- Probes are POSIX sh strings in the manifest. Python is orchestration only.
-- `runner.py` never interprets. If it imports from `verdict.py`, the design is broken.
+- The runner is Go, standard library only. No third-party modules, ever.
+  See `docs/design/LANGUAGE_CHOICE.md` for why, and for the conditions that
+  would reopen it.
+- mise supplies the runtime, after the user approves it. It is proposed like
+  any other tool — never silently installed. `mise.toml` pins the Go version.
+- Stage zero is shell, and stays shell. It runs before mise exists, so it
+  cannot be written in a runtime it is measuring. Preliminary scripts are
+  per-OS (`scripts/os/<uname>.sh`), dispatched by `bootstrap/run.sh`.
+- The Tier-1 fallback (`ferret/bootstrap.sh`) is POSIX sh. It runs when mise
+  was declined or could not install, and its verdict is UNKNOWN, never GO.
+- Probes are POSIX sh strings in the manifest. Go is orchestration only.
+- `runner.go` never interprets. If it imports the verdict package, the design
+  is broken.
 - No code path converts UNKNOWN into GO.
 - Phase 1 is read-only. No mutation anywhere before a baseline is written.
 - Nothing installs before the proposed list is approved. Preferred tool and
