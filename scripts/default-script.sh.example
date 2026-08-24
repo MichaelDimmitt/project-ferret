@@ -6,9 +6,16 @@
 #
 # Contract: docs/design/BOOTSTRAP_PIPELINE.md §2.
 #   - POSIX sh only. No bashisms, no jq, no GNU-only flags.
+#   - No Python. Stage zero measures whether an interpreter exists; it cannot
+#     be written in one.
 #   - Installs nothing. Measures only.
 #   - A failed probe is a finding, never a fatal error.
 #   - Every fact carries the command that produced it.
+#
+# This file is the dispatcher. The probes live in scripts/os/ — a portable
+# core plus one script per OS, because the probes genuinely differ and a
+# single script that tries to cover every OS is wrong everywhere instead of
+# right somewhere.
 #
 # Writes default-results.md. No AI runs this.
 
@@ -16,175 +23,54 @@ set -u
 
 OUT="${1:-default-results.md}"
 
-# --- helpers ---------------------------------------------------------------
-# row NAME VALUE DEFAULT PATH COMMAND
-row() {
-  printf '| %s | %s | %s | %s | `%s` |\n' "$1" "$2" "$3" "$4" "$5" >>"$OUT"
-}
-
-# Absence and unknown are different results. Never collapse them.
-#   present   — probed, found
-#   absent    — probed, not there
-#   unknown   — could not probe (no permission, timed out, no way to ask)
-
-first_line() { sed -n '1p' 2>/dev/null; }
-
-# --- header ----------------------------------------------------------------
-: >"$OUT"
-{
-  echo "# default-results.md"
-  echo
-  echo "Generated: $(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo unknown)"
-  echo "Generator: default-script.sh"
-  echo
-  echo "Regenerate rather than edit. See docs/design/BOOTSTRAP_PIPELINE.md §3."
-  echo
-  echo "| name | value | default | path | command to reproduce |"
-  echo "|---|---|---|---|---|"
-} >>"$OUT"
-
-# --- shells ----------------------------------------------------------------
-# Report EVERY shell found, not the first. Two bash installs on one machine is
-# the case that matters and the case `bash --version` alone gets wrong.
-
-default_shell="${SHELL:-unknown}"
-row "default-shell" "$default_shell" "-" "-" 'printf %s "$SHELL"'
-
-# Candidates: /etc/shells plus the usual prefixes, deduped by realpath.
-shell_candidates() {
-  [ -r /etc/shells ] && grep -v '^#' /etc/shells 2>/dev/null
-  for d in /bin /usr/bin /usr/local/bin /opt/homebrew/bin /opt/local/bin; do
-    for s in sh bash dash zsh ksh mksh ash busybox; do
-      printf '%s/%s\n' "$d" "$s"
-    done
-  done
-}
-
-seen=""
-shell_candidates | while IFS= read -r sh_path; do
-  [ -x "$sh_path" ] || continue
-
-  # Dedupe on resolved target so symlinks don't double-count.
-  real=$(readlink -f "$sh_path" 2>/dev/null || printf '%s' "$sh_path")
-  case " $seen " in *" $real "*) continue ;; esac
-  seen="$seen $real"
-
-  name=$(basename "$sh_path")
-  ver=$("$sh_path" --version 2>/dev/null | first_line) || ver=""
-  [ -n "$ver" ] || ver="present (no --version)"
-
-  if [ "$sh_path" = "$default_shell" ]; then is_default=yes; else is_default=no; fi
-  row "$name" "$ver" "$is_default" "$sh_path" "$sh_path --version"
-done
-
-# --- tools -----------------------------------------------------------------
-# Same rule: every install on PATH, not just the winner.
-
-probe_tool() {
-  tool=$1
-  found=0
-  tool_seen=""
-  # `command -v` finds the active one; walk PATH for the rest.
-  IFS=:
-  for d in $PATH; do
-    [ -n "$d" ] || d=.
-    p="$d/$tool"
-    [ -x "$p" ] || continue
-
-    # A duplicated PATH entry is not a second install. Dedupe on the resolved
-    # target so /opt/homebrew/bin/git listed twice reports once.
-    treal=$(readlink -f "$p" 2>/dev/null || printf '%s' "$p")
-    case " $tool_seen " in *" $treal "*) continue ;; esac
-    tool_seen="$tool_seen $treal"
-
-    found=1
-    ver=$("$p" --version 2>/dev/null | first_line) || ver=""
-    [ -n "$ver" ] || ver="present (no --version)"
-    active=$(command -v "$tool" 2>/dev/null)
-    if [ "$p" = "$active" ]; then is_default=yes; else is_default=no; fi
-    row "$tool" "$ver" "$is_default" "$p" "$p --version"
-  done
-  unset IFS
-  [ "$found" -eq 1 ] || row "$tool" "absent" "-" "-" "command -v $tool"
-}
-
-for t in git python3 node npm pnpm yarn bun deno go rustc cargo \
-         docker podman make cc curl wget mise asdf nvm brew apt dnf pacman; do
-  probe_tool "$t"
-done
-
-# --- capabilities ----------------------------------------------------------
-# Not "is X installed" — the things an AI must know before it can plan.
-# These sit in the same table as installs because to a planner they are
-# exactly as load-bearing as a version number.
-
-# DNS and internet and registry are THREE questions. A machine can fail any
-# one alone, and the distinction changes which fallback is viable.
-if command -v getent >/dev/null 2>&1; then
-  if getent hosts example.com >/dev/null 2>&1; then dns=resolving; else dns=failing; fi
-  row "dns" "$dns" "-" "-" "getent hosts example.com"
+# Where the probe scripts live. Overridable so an adapted copy in bootstrap/
+# can still find them, and so tests can point at fixtures.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -d "$here/os" ]; then
+  OS_DIR="${FERRET_OS_DIR:-$here/os}"
 else
-  row "dns" "unknown" "-" "-" "getent hosts example.com"
+  # We're the seeded copy in bootstrap/; the probes stay in scripts/.
+  OS_DIR="${FERRET_OS_DIR:-$(dirname -- "$here")/scripts/os}"
 fi
 
-if command -v curl >/dev/null 2>&1; then
-  if curl -sI --max-time 5 https://example.com >/dev/null 2>&1; then
-    net=reachable
-  else
-    net=unreachable
-  fi
-  row "internet" "$net" "-" "-" "curl -sI --max-time 5 https://example.com"
+if [ ! -r "$OS_DIR/common.sh" ]; then
+  echo "default-script: missing $OS_DIR/common.sh" >&2
+  exit 1
+fi
 
-  if curl -sI --max-time 5 https://registry.npmjs.org >/dev/null 2>&1; then
-    reg=reachable
-  else
-    reg=unreachable
-  fi
-  row "npm-registry" "$reg" "-" "-" "curl -sI --max-time 5 https://registry.npmjs.org"
+# shellcheck source=scripts/os/common.sh
+. "$OS_DIR/common.sh"
+
+# --- dispatch --------------------------------------------------------------
+# Lowercase uname without tr -- some busybox builds differ on tr ranges.
+uname_s=$(uname -s 2>/dev/null || echo unknown)
+case "$uname_s" in
+  Darwin)  os_key=darwin ;;
+  Linux)   os_key=linux ;;
+  *)       os_key="" ;;
+esac
+
+OS_SCRIPT=""
+if [ -n "$os_key" ] && [ -r "$OS_DIR/$os_key.sh" ]; then
+  OS_SCRIPT="$os_key.sh"
+fi
+
+common_header
+
+if [ -n "$OS_SCRIPT" ]; then
+  # shellcheck source=/dev/null
+  . "$OS_DIR/$OS_SCRIPT"
+  row "os-support" "$os_key" "-" "$OS_DIR/$OS_SCRIPT" "uname -s"
+  probe_os
 else
-  row "internet" "unknown" "-" "-" "curl -sI https://example.com"
-  row "npm-registry" "unknown" "-" "-" "curl -sI https://registry.npmjs.org"
+  # An unrecognized OS is a finding, not a crash — and not a guess at the
+  # nearest match. A Linux script run on a BSD produces confident wrong
+  # answers, which is the failure mode this tool exists to prevent.
+  row "os-support" "unknown ($uname_s)" "-" "-" "uname -s"
+  probe_common
 fi
 
-# Writability of the places a fix would actually touch.
-for d in "$HOME" . /usr/local "${TMPDIR:-/tmp}"; do
-  if [ -w "$d" ]; then w=writable; else w=read-only; fi
-  row "writable:$d" "$w" "-" "$d" "test -w $d"
-done
-
-# sudo: present, passwordless, and usable are three different states.
-if command -v sudo >/dev/null 2>&1; then
-  if sudo -n true 2>/dev/null; then s=passwordless; else s="present (needs password)"; fi
-else
-  s=absent
-fi
-row "sudo" "$s" "-" "-" "sudo -n true"
-
-# Container detection — changes what remediation is even sensible.
-if [ -f /.dockerenv ]; then c=docker
-elif [ -r /proc/1/cgroup ] && grep -qE 'docker|containerd|kubepods' /proc/1/cgroup 2>/dev/null; then c=container
-else c=no
-fi
-row "container" "$c" "-" "-" "test -f /.dockerenv"
-
-# Clock skew taints everything below it (README: Taint).
-if command -v curl >/dev/null 2>&1; then
-  row "clock-local" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "-" "-" "date -u"
-  row "clock-remote" "$(curl -sI --max-time 5 https://example.com 2>/dev/null \
-      | grep -i '^date:' | cut -d' ' -f2- | tr -d '\r')" "-" "-" \
-      "curl -sI https://example.com | grep -i ^date:"
-fi
-
-# --- environment -----------------------------------------------------------
-row "os"     "$(uname -s 2>/dev/null || echo unknown)"     "-" "-" "uname -s"
-row "kernel" "$(uname -r 2>/dev/null || echo unknown)"     "-" "-" "uname -r"
-row "arch"   "$(uname -m 2>/dev/null || echo unknown)"     "-" "-" "uname -m"
-row "locale" "${LANG:-unset}"                              "-" "-" 'printf %s "$LANG"'
-row "path"   "$(printf '%s' "$PATH" | tr ':' ' ')"         "-" "-" 'printf %s "$PATH"'
-row "user"   "$(id -un 2>/dev/null || echo unknown)"       "-" "-" "id -un"
-row "uid"    "$(id -u 2>/dev/null || echo unknown)"        "-" "-" "id -u"
-
-printf '\nProbes: %s\n' "$(grep -c '^| ' "$OUT")" >>"$OUT"
+common_footer
 
 # Exit 0 even when probes failed. A missing tool is a finding, not an error.
 exit 0

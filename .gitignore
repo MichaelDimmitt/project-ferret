@@ -6,11 +6,13 @@
 # See docs/design/BOOTSTRAP_PIPELINE.md.
 bootstrap/default-script.sh
 bootstrap/default-results.md
+# The redacted copy is safe to share, but it is still one machine's state and
+# still regenerated per run. Share it deliberately; don't commit it.
+bootstrap/default-results.redacted.md
 !*.example
 
 # macOS
 .DS_Store
 
-# Python
-__pycache__/
-*.py[cod]
+# Compiled runner — built from source by scripts/sweep.sh, never committed.
+ferret/ferret
