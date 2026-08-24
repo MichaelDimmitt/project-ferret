@@ -362,6 +362,23 @@ func (r *Runner) writeRaw(id, phase, stdout, stderr string, level Redact) {
 	}
 }
 
+// ReadEvidence loads a stored evidence file.
+//
+// This is the verdict engine's only input. Nothing here re-probes or consults
+// the machine -- a stale evidence.json produces a stale verdict, honestly
+// labelled by its captured_at, rather than a silent re-measurement.
+func ReadEvidence(path string) (*Evidence, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading evidence: %w", err)
+	}
+	var ev Evidence
+	if err := json.Unmarshal(b, &ev); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	return &ev, nil
+}
+
 // WriteEvidence serialises to disk.
 func WriteEvidence(path string, ev *Evidence) error {
 	b, err := json.MarshalIndent(ev, "", "  ")

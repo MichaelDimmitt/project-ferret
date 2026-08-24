@@ -1,0 +1,76 @@
+{
+  "layer": 0,
+  "checks": [
+    {
+      "id": "fx.clock.skew",
+      "title": "System clock within tolerance",
+      "probe": "echo skew-seconds",
+      "expect": { "type": "numeric_lt", "actual": "$probe", "value": 120, "unit": "s" },
+      "severity": "blocker",
+      "remedy": "sudo sntp -sS time.apple.com   # macOS",
+      "volatility": "volatile"
+    },
+    {
+      "id": "fx.arch",
+      "title": "Architecture is supported",
+      "probe": "uname -m",
+      "expect": { "type": "one_of", "actual": "$probe", "values": ["arm64", "aarch64", "x86_64"] },
+      "severity": "blocker",
+      "remedy": "unsupported architecture",
+      "volatility": "permanent"
+    },
+    {
+      "id": "fx.node.version",
+      "title": "Node version matches pin",
+      "probe": "node -v",
+      "declared": "cat .nvmrc",
+      "expect": { "type": "semver_satisfies", "actual": "$probe", "range": "$declared" },
+      "severity": "blocker",
+      "remedy": "nvm use $declared",
+      "tainted_by": ["fx.clock.skew"]
+    },
+    {
+      "id": "fx.registry",
+      "title": "Registry reachable",
+      "probe": "curl -sfI --max-time 5 https://registry.npmjs.org",
+      "expect": { "type": "exit_code", "of": "probe", "value": 0 },
+      "severity": "blocker",
+      "remedy": "check network, proxy, and CA bundle",
+      "tainted_by": ["fx.node.version"],
+      "notes": "Transitively tainted: clock -> node -> registry."
+    },
+    {
+      "id": "fx.pnpm.lockfile",
+      "title": "pnpm lockfile matches pnpm major",
+      "applies_if": "test -f pnpm-lock.yaml",
+      "probe": "pnpm --version",
+      "expect": { "type": "matches", "actual": "$probe", "pattern": "^9\\." },
+      "severity": "warning",
+      "remedy": "corepack prepare pnpm@9 --activate"
+    },
+    {
+      "id": "fx.disk.free",
+      "title": "Disk free above floor",
+      "probe": "df -k . | awk 'NR==2 {print $4}'",
+      "expect": { "type": "numeric_gt", "actual": "$probe", "value": 1048576, "unit": "KiB" },
+      "severity": "blocker",
+      "remedy": "free disk space"
+    },
+    {
+      "id": "fx.tool.missing",
+      "title": "A tool that is not installed",
+      "probe": "some-absent-tool --version",
+      "expect": { "type": "non_empty", "actual": "$probe" },
+      "severity": "warning",
+      "remedy": "install some-absent-tool"
+    },
+    {
+      "id": "fx.proxy.absent",
+      "title": "No proxy configured",
+      "probe": "printenv HTTP_PROXY",
+      "expect": { "type": "absent", "actual": "$probe" },
+      "severity": "info",
+      "decisive": false
+    }
+  ]
+}

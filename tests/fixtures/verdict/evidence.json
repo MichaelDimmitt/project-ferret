@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "ferret_version": "0.1.0-fixture",
+  "started_at": "2026-08-24T14:02:11Z",
+  "finished_at": "2026-08-24T14:02:19Z",
+  "redact_level": "identity",
+  "manifest_files": [
+    "00-fixture.json"
+  ],
+  "records": [
+    {
+      "id": "fx.clock.skew",
+      "layer": 0,
+      "applies": true,
+      "applies_if": null,
+      "probe": {
+        "stdout": "702\n",
+        "stderr": "",
+        "exit": 0,
+        "duration_ms": 412,
+        "timed_out": false,
+        "truncated": false
+      },
+      "declared": null,
+      "error": null,
+      "volatility": "volatile",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:11Z"
+    },
+    {
+      "id": "fx.arch",
+      "layer": 0,
+      "applies": true,
+      "applies_if": null,
+      "probe": {
+        "stdout": "arm64\n",
+        "stderr": "",
+        "exit": 0,
+        "duration_ms": 3,
+        "timed_out": false,
+        "truncated": false
+      },
+      "declared": null,
+      "error": null,
+      "volatility": "permanent",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:12Z"
+    },
+    {
+      "id": "fx.node.version",
+      "layer": 0,
+      "applies": true,
+      "applies_if": null,
+      "probe": {
+        "stdout": "v20.11.0\n",
+        "stderr": "",
+        "exit": 0,
+        "duration_ms": 38,
+        "timed_out": false,
+        "truncated": false
+      },
+      "declared": {
+        "stdout": "20\n",
+        "stderr": "",
+        "exit": 0,
+        "duration_ms": 4,
+        "timed_out": false,
+        "truncated": false
+      },
+      "error": null,
+      "volatility": "session",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:13Z"
+    },
+    {
+      "id": "fx.registry",
+      "layer": 0,
+      "applies": true,
+      "applies_if": null,
+      "probe": {
+        "stdout": "",
+        "stderr": "",
+        "exit": 0,
+        "duration_ms": 284,
+        "timed_out": false,
+        "truncated": false
+      },
+      "declared": null,
+      "error": null,
+      "volatility": "volatile",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:14Z"
+    },
+    {
+      "id": "fx.pnpm.lockfile",
+      "layer": 0,
+      "applies": false,
+      "applies_if": {
+        "stdout": "",
+        "stderr": "",
+        "exit": 1,
+        "duration_ms": 2,
+        "timed_out": false,
+        "truncated": false
+      },
+      "probe": null,
+      "declared": null,
+      "error": null,
+      "volatility": "session",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:15Z"
+    },
+    {
+      "id": "fx.disk.free",
+      "layer": 0,
+      "applies": true,
+      "applies_if": null,
+      "probe": {
+        "stdout": "204857600\n",
+        "stderr": "",
+        "exit": 0,
+        "duration_ms": 11,
+        "timed_out": false,
+        "truncated": false
+      },
+      "declared": null,
+      "error": null,
+      "volatility": "session",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:16Z"
+    },
+    {
+      "id": "fx.tool.missing",
+      "layer": 0,
+      "applies": true,
+      "applies_if": null,
+      "probe": {
+        "stdout": "",
+        "stderr": "sh: some-absent-tool: command not found\n",
+        "exit": 127,
+        "duration_ms": 5,
+        "timed_out": false,
+        "truncated": false
+      },
+      "declared": null,
+      "error": {
+        "kind": "tool_absent",
+        "detail": "sh: some-absent-tool: command not found"
+      },
+      "volatility": "session",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:17Z"
+    },
+    {
+      "id": "fx.proxy.absent",
+      "layer": 0,
+      "applies": true,
+      "applies_if": null,
+      "probe": {
+        "stdout": "",
+        "stderr": "",
+        "exit": 1,
+        "duration_ms": 2,
+        "timed_out": false,
+        "truncated": false
+      },
+      "declared": null,
+      "error": null,
+      "volatility": "session",
+      "provenance": "observed",
+      "captured_at": "2026-08-24T14:02:18Z"
+    }
+  ]
+}

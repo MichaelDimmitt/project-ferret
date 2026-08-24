@@ -42,20 +42,25 @@ func main() {
 		redactFlag  = flag.String("redact", "", "run-wide redaction: identity, secret, or empty")
 		rawDir      = flag.String("raw", ".ferret/raw", "untruncated probe output, or empty to skip")
 		validate    = flag.Bool("validate", false, "validate the manifest and exit; run no probes")
+		verdictOnly = flag.Bool("verdict", false,
+			"skip probing: read an existing evidence.json and re-decide from it")
 	)
 	flag.Parse()
 
-	if err := run(*manifestDir, *outPath, *workDir, *rawDir, Redact(*redactFlag), *validate); err != nil {
+	code, err := run(*manifestDir, *outPath, *workDir, *rawDir,
+		Redact(*redactFlag), *validate, *verdictOnly)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "ferret: %v\n", err)
 		os.Exit(exitCannot)
 	}
+	os.Exit(code)
 }
 
-func run(manifestDir, outPath, workDir, rawDir string, redact Redact, validateOnly bool) error {
+func run(manifestDir, outPath, workDir, rawDir string, redact Redact, validateOnly, verdictOnly bool) (int, error) {
 	switch redact {
 	case RedactNone, RedactIdentity, RedactSecret:
 	default:
-		return fmt.Errorf("unknown -redact %q (want: identity, secret, or empty)", redact)
+		return exitCannot, fmt.Errorf("unknown -redact %q (want: identity, secret, or empty)", redact)
 	}
 
 	// §10 steps 1-2. Validation runs before any probe executes: a malformed
@@ -73,53 +78,98 @@ func run(manifestDir, outPath, workDir, rawDir string, redact Redact, validateOn
 			for _, p := range ve.Problems {
 				fmt.Fprintf(os.Stderr, "  - %s\n", p)
 			}
-			return fmt.Errorf("%d manifest problem(s); no probes were run", len(ve.Problems))
+			return exitCannot, fmt.Errorf("%d manifest problem(s); no probes were run", len(ve.Problems))
 		}
-		return err
+		return exitCannot, err
 	}
 
 	if validateOnly {
 		fmt.Printf("manifest ok: %d checks across %d file(s)\n", len(m.Checks), len(m.Files))
-		return nil
+		return exitGo, nil
 	}
 
-	if rawDir != "" {
-		if err := os.MkdirAll(rawDir, 0o755); err != nil {
-			// Losing the debug directory is not worth losing the sweep.
-			fmt.Fprintf(os.Stderr, "ferret: warning: no raw dir (%v); continuing\n", err)
-			rawDir = ""
+	var ev *Evidence
+
+	if verdictOnly {
+		// Re-decide from stored evidence, touching nothing. This is the
+		// property the capture/interpret split buys: change an `expect`, run
+		// this, get a new verdict without re-measuring the machine.
+		ev, err = ReadEvidence(outPath)
+		if err != nil {
+			return exitCannot, err
+		}
+		fmt.Fprintf(os.Stderr, "ferret: re-deciding from %s (captured %s); no probes run\n",
+			outPath, ev.StartedAt)
+	} else {
+		if rawDir != "" {
+			if err := os.MkdirAll(rawDir, 0o755); err != nil {
+				// Losing the debug directory is not worth losing the sweep.
+				fmt.Fprintf(os.Stderr, "ferret: warning: no raw dir (%v); continuing\n", err)
+				rawDir = ""
+			}
+		}
+
+		abs, err := filepath.Abs(workDir)
+		if err != nil {
+			return exitCannot, fmt.Errorf("resolving -dir: %w", err)
+		}
+
+		r := &Runner{
+			Manifest:    m,
+			WorkDir:     abs,
+			RawDir:      rawDir,
+			RedactLevel: redact,
+			Version:     version,
+		}
+
+		ev, err = r.Run(context.Background())
+		if err != nil {
+			return exitCannot, err
+		}
+
+		if err := WriteEvidence(outPath, ev); err != nil {
+			return exitCannot, err
+		}
+		fmt.Fprintf(os.Stderr, "ferret: captured %d checks -> %s\n", len(ev.Records), outPath)
+	}
+
+	// Capture is done. Interpretation starts here, and it is a separate step
+	// against a file -- not a continuation of the sweep. The runner above
+	// produced evidence without knowing what any of it means.
+	rep, err := Evaluate(m, ev)
+	if err != nil {
+		return exitCannot, err
+	}
+
+	printSummary(rep)
+
+	// Exit codes are the verdict engine's to set, per ARCHITECTURE §11. The
+	// runner alone never returns 1 or 2, because it has made no judgment.
+	return rep.ExitCode(), nil
+}
+
+// printSummary is a placeholder for M4's renderer.
+//
+// It is deliberately plain: the severity-ordered glance is the product and it
+// gets designed on its own, not smuggled in as a debug print that nobody
+// revisits. This exists so M2 is runnable and verifiable now.
+func printSummary(rep *Report) {
+	for _, v := range rep.Verdicts {
+		line := fmt.Sprintf("%-8s %-28s %s", v.State, v.ID, v.Detail)
+		if v.State == StateUnknown {
+			line = fmt.Sprintf("%-8s %-28s %s: %s", v.State, v.ID, v.Reason, v.Detail)
+		}
+		fmt.Println(line)
+		if v.Remedy != "" {
+			fmt.Printf("         %-28s -> %s\n", "", v.Remedy)
+		}
+		if v.TaintedCount > 0 {
+			fmt.Printf("         %-28s -> taints %d check(s) below\n", "", v.TaintedCount)
 		}
 	}
-
-	abs, err := filepath.Abs(workDir)
-	if err != nil {
-		return fmt.Errorf("resolving -dir: %w", err)
-	}
-
-	r := &Runner{
-		Manifest:    m,
-		WorkDir:     abs,
-		RawDir:      rawDir,
-		RedactLevel: redact,
-		Version:     version,
-	}
-
-	ev, err := r.Run(context.Background())
-	if err != nil {
-		return err
-	}
-
-	if err := WriteEvidence(outPath, ev); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(os.Stderr, "ferret: captured %d checks -> %s\n", len(ev.Records), outPath)
-
-	// The runner exits 0 when it captured everything it was asked to, and 3
-	// when it could not do its job. It NEVER exits 1 or 2: those are verdicts,
-	// and it has no idea what it captured. The process that decides is a
-	// different process, and it does not exist yet (M2).
-	return nil
+	fmt.Printf("\n%d GO  %d NO-GO  %d UNKNOWN  %d N/A\n",
+		rep.Counts[StateGo], rep.Counts[StateNoGo],
+		rep.Counts[StateUnknown], rep.Counts[StateNA])
 }
 
 func asValidationError(err error, target **ValidationError) bool {

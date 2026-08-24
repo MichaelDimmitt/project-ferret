@@ -83,21 +83,52 @@ belong to the process that decides.
 
 ## M2 — Verdict engine
 
-- [ ] `ferret/verdict.go` — applies `expect` to evidence, emits GO / NO-GO / UNKNOWN / N/A
-- [ ] Predicates: `equals`, `matches`, `one_of`, `non_empty`, `absent`, `numeric_lt`, `numeric_gt`, `semver_satisfies`, `exit_code`
-- [ ] Reads `evidence.json` as its **only** input — never re-probes
-- [ ] Test asserting **no code path turns UNKNOWN into GO**
+- [x] `ferret/verdict.go` — applies `expect` to evidence, emits GO / NO-GO / UNKNOWN / N/A
+- [x] Predicates: `equals`, `matches`, `one_of`, `non_empty`, `absent`, `numeric_lt`, `numeric_gt`, `semver_satisfies`, `exit_code`
+      — semver in `ferret/semver.go`, scoped to the table in MANIFEST_SCHEMA.md
+      §4. Anything outside it is UNKNOWN with the unparsed range in the reason,
+      never an approximation
+- [x] Reads `evidence.json` as its **only** input — never re-probes
+      — `ferret -verdict` re-decides from a stored file
+- [x] Test asserting **no code path turns UNKNOWN into GO**
+      — `TestUnknownNeverBecomesGo` drives all six routes to UNKNOWN through
+      one manifest and asserts none resolves GO, none lacks a reason, and the
+      report does not exit 0
 
 **Exit:** `verdict.go` runs standalone against a committed fixture `evidence.json` and produces stable output. Editing an `expect` and re-running changes the verdict without touching the machine.
+
+**Met.** Against `tests/fixtures/verdict/`: clock skew 702s is NO-GO and taints
+two checks whose own probes passed. Widening the tolerance to 900s in the
+manifest alone flips it to GO, releases the taint, and the evidence file is
+byte-identical afterwards — nothing was re-probed. 115 assertions.
+
+Taint arrives late, deliberately: M3 owns the DAG, but a NO-GO prerequisite
+that let its dependents render green would have been a false green shipped for
+a whole milestone. What M3 still owes: cycle detection at verdict time
+(currently only at load), and the ordering guarantees.
 
 ---
 
 ## M3 — Taint
 
-- [ ] DAG from `tainted_by`, topological sort
-- [ ] NO-GO prerequisite ⇒ dependents become UNKNOWN(tainted), **probe output preserved in evidence**
+Partly landed with M2 — a NO-GO prerequisite whose dependents rendered green
+would have been a false green shipped for a whole milestone, so the propagation
+could not wait. What remains is the DAG's own machinery.
+
+- [x] DAG from `tainted_by` — *(landed in M2)* fixed-point propagation rather
+      than a topological sort. Equivalent for an acyclic graph of this size and
+      simpler to read; revisit if the manifest grows past a few hundred checks
+- [x] NO-GO prerequisite ⇒ dependents become UNKNOWN(tainted), **probe output preserved in evidence**
+      — *(landed in M2)* asserted by `TestTaintPreservesEvidence`
+- [x] Rollup count on the cause for rendering — *(landed in M2)* the count
+      lands on the ROOT cause, and a tainted check drops its own remedy,
+      because the fix belongs to the prerequisite
 - [ ] Cycle detection fails loudly with the offending ids — never resolves arbitrarily
-- [ ] Rollup count on the cause for rendering
+      — load-time detection exists (§8 rule 4, `TestCycleNamesBothEnds`);
+      still to do is the verdict-time guard and the exit-3 path
+- [x] Transitive taint through a chain deeper than two — *(landed in M2)* the
+      committed fixture chains clock → node → registry, and both dependents
+      name the root cause rather than the intermediate
 
 **Exit:** fixture with deliberate clock skew marks its dependents tainted and reports `→ taints N checks below`. Fixture with a cycle exits 3 naming both ends.
 
