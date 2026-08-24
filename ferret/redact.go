@@ -143,9 +143,7 @@ func shapeOf(s string) string {
 	return fmt.Sprintf("<set, %d chars, hash %s>", len(trimmed), digest)
 }
 
-// shapeLines handles captures with several lines -- an `env` dump, an
-// .npmrc. Each line is shaped independently so structure survives while values
-// do not.
+// assignmentRe splits one `key=value` or `key: value` line.
 //
 // The key pattern is deliberately permissive about leading punctuation,
 // because a real .npmrc key is not an identifier:
@@ -157,11 +155,38 @@ func shapeOf(s string) string {
 // thing this function exists to catch.
 var assignmentRe = regexp.MustCompile(`^([A-Za-z0-9_./:@-]*[A-Za-z0-9_])\s*([=:])\s*(.*)$`)
 
+// credentialKeyRe decides WHICH assignments get shaped.
+//
+// Shaping every assignment was the first implementation, and it was wrong in a
+// way that would have surfaced two milestones later. An .npmrc came back as:
+//
+//	registry=<set, 27 chars, hash 89c6…>
+//	ignore-scripts=<set, 4 chars, hash a18a…>
+//
+// Those are not secrets, and PLAN.md M7 requires checking their values --
+// registry, scopes, ignore-scripts. Shaped, no `equals` or `matches`
+// expectation can ever evaluate them, so the checks would have been
+// unimplementable at redact: secret and the cause would have looked like a
+// verdict bug rather than a redaction one.
+//
+// Erring toward shaping: a key not on this list keeps its value, so the list
+// governs a leak. It is matched as a substring against the lowercased key,
+// so `_authToken`, `NPM_TOKEN`, and `GITHUB_API_KEY` all hit without needing
+// an entry each.
+var credentialKeyRe = regexp.MustCompile(
+	`(?i)(token|secret|password|passwd|apikey|api_key|credential|private_key|auth|session|cookie|signature|_key$|^key$)`)
+
+// shapeLines handles captures with several lines -- an `env` dump, an
+// .npmrc. Only credential-keyed values are shaped; the rest survive, because
+// a check that cannot read its own subject is not a check.
 func shapeLines(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		m := assignmentRe.FindStringSubmatch(line)
 		if m == nil {
+			continue
+		}
+		if !credentialKeyRe.MatchString(m[1]) {
 			continue
 		}
 		lines[i] = m[1] + m[2] + shapeOf(m[3])

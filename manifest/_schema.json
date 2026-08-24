@@ -110,6 +110,10 @@
           "const": false,
           "description": "The mutation denylist escape hatch. Only false is legal -- there is no mutating: true, because a check that admits to mutating does not belong in phase 1. Requires mutating_why."
         },
+        "isolate": {
+          "const": true,
+          "description": "Run the commands under a cleared environment: PATH (fixed value) and HOME only. Only true is legal -- false is the default and states nothing. Use for checks whose answer must hold in a fresh shell, so a tool that only exists because of the user's .zshrc is not reported as a GO that CI will not reproduce."
+        },
         "mutating_why": {
           "type": "string",
           "minLength": 1,

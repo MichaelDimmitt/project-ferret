@@ -116,6 +116,7 @@ type Check struct {
 	RedactLevel Redact   `json:"redact"`
 	Mutating    *bool    `json:"mutating"`
 	MutatingWhy string   `json:"mutating_why"`
+	Isolate     *bool    `json:"isolate"`
 	Volatility  string   `json:"volatility"`
 	Notes       string   `json:"notes"`
 
@@ -372,6 +373,16 @@ func (m *Manifest) validate(ve *ValidationError) {
 			}
 		} else if c.MutatingWhy != "" {
 			ve.addf("%s: mutating_why without mutating: false", where)
+		}
+
+		// Rule 6b: isolation is opt-in and only opt-in.
+		//
+		// `isolate: false` is the default, so writing it states nothing. It is
+		// rejected rather than ignored because a reader who writes it plainly
+		// believes it does something, and a field that silently means nothing
+		// is worse than one that errors.
+		if c.Isolate != nil && !*c.Isolate {
+			ve.addf("%s: isolate must be true; false is the default and states nothing", where)
 		}
 
 		// Rules 7-9: expect shape and interpolation.

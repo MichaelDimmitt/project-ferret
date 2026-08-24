@@ -278,6 +278,38 @@ is a check that does not belong in phase 1.
 Requires `mutating_why` (§8) — a justification, in the file, next to the
 override. An override without a stated reason is how a denylist rots.
 
+### `isolate` — optional, literal `true`
+
+Runs the check's commands under a cleared environment — `env -i` in spirit,
+implemented as an explicitly constructed environment rather than an inherited
+one. Only `true` is legal: `"isolate": false` is the default and states
+nothing, so writing it is noise.
+
+The environment the check receives is `PATH` (set to a fixed, conservative
+value), `HOME`, and nothing else. Not `NODE_OPTIONS`, not `NVM_DIR`, not
+`http_proxy`, not the forty other variables a login shell exports.
+
+This exists because of a specific false negative. A developer's `.zshrc` puts
+a tool on `PATH`, the probe finds it, Ferret reports GO — and CI, which never
+sources `.zshrc`, cannot find it at all. The check measured the developer's
+shell rather than the environment the build will actually run in, and reported
+a green that does not survive contact with the build machine.
+
+Isolation is opt-in rather than the default because most checks legitimately
+want the real environment: "is the proxy configured *here*" is a question
+about this shell, and clearing it would answer a different question. Use
+`isolate` for checks whose answer must hold in a fresh shell — tool presence,
+version resolution, `PATH` shadowing.
+
+`HOME` survives because too much breaks without it (`git` finds no config,
+version managers find no installs) and it is not the variable that causes the
+false negative. `PATH` is set rather than cleared, because a probe with no
+`PATH` cannot run `sh` builtins' external counterparts and would fail as
+`tool_absent` regardless of what is installed — which is the same false
+answer in the other direction.
+
+Contract: `docs/design/ARCHITECTURE.md` §5, "fresh-shell isolation".
+
 ### `volatility` — optional, enum
 
 `permanent` | `stable` | `session` | `volatile` | `expiring`. Default `session`.

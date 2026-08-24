@@ -181,7 +181,7 @@ and fixed before the format could calcify:
 
 Do this before the manifest grows, because both get harder to retrofit with volume.
 
-- [ ] Allowlist redaction at capture time in the runner
+- [x] Allowlist redaction at capture time in the runner
 - [x] *(landed early, at stage zero)* Redaction in `cell()` for
       `default-results.md`, at two levels — `--redact` (identity) and
       `--redact=paranoid` (adds fingerprint and posture); asserted by
@@ -195,17 +195,53 @@ Do this before the manifest grows, because both get harder to retrofit with volu
       is no probe that legitimately needs a secret's value, so an escape hatch
       would only ever be used to do the forbidden thing. Binding on agents too;
       see `AGENTS.md` § *Never read a secret*.
-- [ ] Presence-and-shape recording: `GH_TOKEN: <set, 40 chars, ghp_…>`
+- [x] Presence-and-shape recording: `GH_TOKEN: <set, 40 chars, ghp_…>`
       — now a **backstop against an authoring mistake, not the mechanism**. A
       correctly written probe never produces a value for it to shape
-- [ ] Stable salted hashing for credential-shaped values — same demotion; it
+- [x] Stable salted hashing for credential-shaped values — same demotion; it
       answers "same token as before" only in the case where something was
       wrongly captured
-- [ ] Secret fixtures (fake `GH_TOKEN`, `.npmrc` `_authToken`, remote with embedded creds) asserted absent from both outputs
-- [ ] Read-only test: full sweep against fixture repo, assert working tree + index + config hashes unchanged
-- [ ] `env -i` isolation for shell-state probes
+- [x] Secret fixtures asserted absent from both outputs — **not fake
+      credentials**. AGENTS.md rule 5 forbids writing a secret, and calls a
+      realistic-looking fake "still a string someone will grep for and mistake
+      for real." The fixtures carry a real token's *shape* (recognised prefix,
+      plausible length) on a body that says in words that it is not one. Same
+      code path, nothing greppable that reads as real. Covers all three cases
+      the plan named: env token, `.npmrc` `_authToken`, remote with embedded
+      credentials
+- [x] Read-only test: full sweep against fixture repo, assert working tree +
+      index + config hashes unchanged — repo built in `t.TempDir()` at test
+      time rather than committed; a nested `.git` fixture is awkward to commit
+      and easy to corrupt. `TestFingerprintDetectsMutation` gives the detector
+      teeth: without it, a pass could mean the invariant holds *or* that the
+      fingerprint sees nothing
+- [x] `env -i` isolation for shell-state probes — new `isolate` field
+      (MANIFEST_SCHEMA.md §3). Opt-in, because most checks legitimately want
+      the real environment: "is the proxy set *here*" is a question about this
+      shell. `PATH` is set rather than cleared, and `HOME` survives — a probe
+      with neither reports every tool absent, which is the same false answer
+      pointing the other way
 
-**Exit:** secret fixtures do not survive. Read-only test passes. `git status` clean after a sweep.
+**Exit:** met. Secret fixtures do not survive into `evidence.json`, the stdout
+glance, or `status.md`. The read-only test passes and detects a planted
+mutation. 83 Go test functions, shellcheck/vet/gofmt clean.
+
+**A defect found by the secret fixtures, worth recording.** `shapeLines`
+shaped *every* assignment, not just credential-keyed ones, so an `.npmrc` came
+back as `registry=<set, 27 chars, hash…>` and `ignore-scripts=<set, 4 chars,
+hash…>`. Those are not secrets, and M7 requires checking their values — shaped,
+no `equals` or `matches` could ever evaluate them. M5 would have quietly made
+three M7 checks unimplementable at `redact: secret`, and the failure would have
+looked like a verdict bug two milestones from its cause. Now shaped by key
+(`credentialKeyRe`), with both halves pinned: non-secret settings keep their
+values, credential keys are still shaped under every spelling tried.
+
+One test in this batch was vacuous when first written — a runner-level probe
+meant to exercise the shaping backstop was refused by `readsSecret` first, so
+it asserted "no leak" over an empty capture. Defence in depth working as
+designed is exactly what makes the second layer unreachable from outside, so
+it is now tested where it lives. Noted because a test that passes for the
+wrong reason is worse than no test.
 
 ---
 

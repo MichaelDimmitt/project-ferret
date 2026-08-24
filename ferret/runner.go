@@ -318,6 +318,19 @@ func (r *Runner) exec(ctx context.Context, c *Check, script string, timeout floa
 	cmd := exec.CommandContext(cctx, "sh", "-c", script)
 	cmd.Dir = r.WorkDir
 
+	// Fresh-shell isolation, per MANIFEST_SCHEMA.md `isolate` and
+	// ARCHITECTURE.md §5. Opt-in, because most checks legitimately want the
+	// real environment -- "is the proxy set HERE" is a question about this
+	// shell.
+	//
+	// The failure this prevents: a tool that is only on PATH because of the
+	// user's .zshrc gets reported GO, and CI -- which never sources it --
+	// cannot find the tool at all. That is a green that does not survive
+	// contact with the build machine.
+	if c.Isolate != nil && *c.Isolate {
+		cmd.Env = isolatedEnv()
+	}
+
 	// Kill the whole process group on timeout. A probe that spawns a child --
 	// a curl inside a pipeline -- would otherwise outlive the timeout and hold
 	// the pipe open, which is the hang this timeout exists to prevent.
@@ -399,6 +412,30 @@ func (r *Runner) exec(ctx context.Context, c *Check, script string, timeout floa
 	}
 
 	return res, nil
+}
+
+// isolationPath is the PATH an isolated probe gets: the conventional system
+// directories, and nothing a version manager or dotfile has prepended.
+//
+// Set rather than cleared. A probe with no PATH at all cannot exec anything
+// and would report tool_absent for every tool regardless of what is installed
+// -- the same false answer as the one isolation exists to prevent, pointing
+// the other way.
+const isolationPath = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+// isolatedEnv builds the environment for an isolated probe explicitly, rather
+// than filtering the inherited one. A denylist of variables to strip would
+// miss the next NODE_OPTIONS someone invents; an allowlist of two cannot.
+//
+// HOME survives because too much breaks without it -- git finds no config,
+// version managers find no installs -- and it is not the variable that causes
+// the false negative this exists to prevent.
+func isolatedEnv() []string {
+	env := []string{"PATH=" + isolationPath}
+	if home := os.Getenv("HOME"); home != "" {
+		env = append(env, "HOME="+home)
+	}
+	return env
 }
 
 func truncate(s string) (string, bool) {
