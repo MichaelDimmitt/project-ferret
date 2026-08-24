@@ -119,6 +119,16 @@ The real question is not "are forty checks green." It is: **can this repo go clo
 
 Everything before that is preflight — cheap checks that *explain* a failure and save you watching a build fail for a reason you could have known in thirty seconds. The golden path is the verdict. Preflight is the diagnosis. The proposal is what you approve in between.
 
+## Running it
+
+```sh
+./bootstrap/run.sh      # 1. measure this machine — works now
+./scripts/sweep.sh      # 2. check this repo      — stub until M1
+```
+
+Stage zero first, always; everything after reads what it measured.
+Quick list: `HOW-simple.md`. Full detail: `HOW.md`.
+
 ## Status
 
 Early. See `docs/plan/PLAN.md` for milestones and `docs/design/ARCHITECTURE.md` for the design.
@@ -131,7 +141,7 @@ Runnable code and prose are kept apart, and the prose is split by what it's for.
 
 ```
 bootstrap/     stage zero — measure this machine before anything else runs
-ferret/        the Python runner, verdict engine, renderer
+ferret/        the Go runner, verdict engine, renderer
 manifest/      the checks, as data
 scripts/       shell entry points and committed reference scripts
 tests/         fixtures and tests
@@ -143,8 +153,11 @@ docs/plan/     how it gets built — milestones and the standing prompt
 
 | File | Role |
 |---|---|
+| `HOW-simple.md` | What to run, as a bulleted list |
+| `HOW.md` | What to run, when, and in what order |
 | `docs/design/FRAMEWORK.md` | The evaluation theory — layers, ambient vs declared, why first passes fail |
 | `docs/design/ARCHITECTURE.md` | How Ferret is built and why |
+| `docs/design/LANGUAGE_CHOICE.md` | Why the runner is Go, what mise changes, Rust as the alternative |
 | `docs/design/BOOTSTRAP_PIPELINE.md` | The five documents: measure the machine with a script, then plan against it |
 | `docs/design/DOCS_MODEL.md` | The three documents, volatility, provenance, the baseline rule |
 | `docs/plan/PLAN.md` | Milestones, in order |
